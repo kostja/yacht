@@ -37,8 +37,25 @@ type Env struct {
 // Parse command line and configuration options and print
 // usage if necessary
 func (env *Env) Usage() {
-	pflag.BoolVar(&env.force, "force", false, `Go on with other tests in case of an
-	individual test failure. Default: false`)
+	pflag.BoolVar(&env.force, "force", false,
+		`Go on with other tests in case of an individual test failure.
+Default: false`)
+	pflag.Usage = func() {
+		fmt.Println("yacht - a Yet Another Scylla Harness for Testing")
+		fmt.Printf("\nUsage: %v [--force] [pattern [...]]\n", os.Args[0])
+		fmt.Println(
+			`
+Positional arguments:
+[pattrn [...]]  List of test name patterns to look for in
+                suites. Each name is used as a substring to look for
+                in the path to test file, e.g. "desc" will run all
+                tests that have "desc" in their name in all suites,
+                "lwt/desc" will only enable tests starting with "desc"
+                in "lwt" suite. Default: run all tests in all suites.`)
+		fmt.Println("\nOptional arguments:")
+		pflag.PrintDefaults()
+		os.Exit(0)
+	}
 	pflag.Parse()
 	env.filters = pflag.Args()
 }
@@ -113,8 +130,9 @@ func YachtNew(env Env) Yacht {
 }
 
 // Remove artefacts of tests which could still be in flight
-func (yacht *Yacht) TearDown() {
+func (yacht *Yacht) TearDown() int {
 	yacht.lane.Abort()
+	return 0
 }
 
 // Kill running servers on SIGINT but leave the data directory
@@ -160,14 +178,10 @@ func (yacht *Yacht) Run() {
 func main() {
 
 	var env Env
-
 	env.Usage()
-
 	yacht := YachtNew(env)
-
-	defer yacht.TearDown()
-
 	setSignalAction(&yacht)
-
 	yacht.Run()
+
+	os.Exit(yacht.TearDown())
 }

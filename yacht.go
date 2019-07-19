@@ -14,16 +14,14 @@ import "github.com/spf13/viper"
 //import "bufio"
 
 // Yacht running environment.
-// @todo Initialize using command line options, environment variables
-// and a configuration file
 type Env struct {
-	// Continue running tests even if a single test or test case fails
+	// Continue running tests even if a single test fails
 	force bool
-	// Run only tests matching the given masks. The masks are
+	// Run only tests matching the given patterns. The patterns are
 	// separated by space. If multiple
-	// masks are provided, every match counts once, so if
-	// the same test file matches two masks it is run twice.
-	filters []string
+	// patterns are provided, every test name is matched against every
+	// pattern, so if the same test file matches two patterns it is run twice.
+	patterns []string
 	// Where to look for test suites
 	srcdir string
 	// A temporary directory where to run the tests;
@@ -32,20 +30,18 @@ type Env struct {
 	vardir string
 	// Where to look for server binaries
 	builddir string
-	// Rather than set up and tear down a new server or
-	// cluster use the given URI to connect to  an existing
-	// server.
-	uri string
 }
 
 func (env *Env) configure() {
-	// Look for .yacht.yml or .yacht.json in ~
+	// A configuration file can be provided to help yacht find
+	// the server binary and test sources.
+	// Look for .yacht.yml or .yacht.json in the home directory
 	//
 	viper.SetConfigName(".yacht") // name of config file (without extension)
 	viper.AddConfigPath("$HOME/")
 
-	// Helper structures to match the nested json/yaml of the config
-	// file. The names have to be uppercased for marshalling
+	// Helper structures to match the nested json/yaml of the configuration
+	// file. The names have to be uppercased for Go introspection to work.
 	type Scylla struct {
 		Builddir string
 		Srcdir   string
@@ -67,7 +63,7 @@ func (env *Env) configure() {
 	}
 	// Check if a config file is present
 	if err := viper.ReadInConfig(); err == nil {
-		fmt.Printf("Using configuration from %s\n", viper.ConfigFileUsed())
+		fmt.Printf("Using configuration file %s\n", viper.ConfigFileUsed())
 		// Parse the config file
 		if err := viper.Unmarshal(&configuration); err != nil {
 			log.Fatalf("Parsing configuration failed: %v", err)
@@ -98,10 +94,10 @@ Default: false`)
 		fmt.Println(
 			`
 Positional arguments:
-[pattrn [...]]  List of test name patterns to look for in
-                suites. Each name is used as a substring to look for
-                in the path to test file, e.g. "desc" will run all
-                tests that have "desc" in their name in all suites,
+[pattrn [...]]  List of test name patterns to look for in suites.
+                Each name is used as a substring to look for in the
+                path to test file, e.g. "desc" will run all tests
+                that have "desc" in their name in all suites,
                 "lwt/desc" will only enable tests starting with "desc"
                 in "lwt" suite. Default: run all tests in all suites.`)
 		fmt.Println("\nOptional arguments:")
@@ -109,8 +105,7 @@ Positional arguments:
 		os.Exit(0)
 	}
 	pflag.Parse()
-	env.filters = pflag.Args()
-	log.Println(env)
+	env.patterns = pflag.Args()
 }
 
 // An artefact is anything left by a test or suite while
@@ -175,13 +170,6 @@ type Yacht struct {
 	suites []TestSuite
 }
 
-// Check environment, find test suites
-func YachtNew(env Env) Yacht {
-	yacht := Yacht{}
-	yacht.env = env
-	return yacht
-}
-
 // Remove artefacts of tests which could still be in flight
 func (yacht *Yacht) TearDown() int {
 	yacht.lane.Abort()
@@ -201,14 +189,41 @@ func setSignalAction(yacht *Yacht) {
 	}()
 }
 
-func (yacht *Yacht) PrintGreeting() {
-}
-
 func (yacht *Yacht) PrintSummary() {
 }
 
+func (yacht *Yacht) FindSuites() {
+	files, err := filepath.Glob(yacht.env.srcdir)
+	if err != nil {
+		log.Fatalf("Failed to find suites in %s: %v", yacht.env.srcdir, err)
+	}
+	for _, file := range files {
+		st, err := os.Stat(file)
+		if err != nil || st.IsDir() == false {
+			continue
+		}
+		suite_config := viper.New()
+		suite_config.SetConfigName("suite")
+		suite_config.AddConfigPath(file)
+		// Every suite.yaml must have a suite type in it.
+		type BasicSuiteConfiguration struct {
+			Type string
+		}
+		// Skip files which can not be read
+		if err := viper.ReadInConfig(); err == nil {
+			var cfg BasicSuiteConfiguration
+			if err := viper.Unmarshal(&cfg); err != nil {
+				log.Printf("Skipping broken suite %s: %v", file, err)
+			}
+
+			//			yacht.suites.add(TestSuiteNew(cfg.Type, file))
+		}
+	}
+}
+
 func (yacht *Yacht) Run() {
-	yacht.PrintGreeting()
+
+	yacht.FindSuites()
 
 	for _, suite := range yacht.suites {
 		// Clear the lane between test suites
@@ -231,7 +246,9 @@ func main() {
 
 	var env Env
 	env.Usage()
-	yacht := YachtNew(env)
+	yacht := Yacht{
+		env: env,
+	}
 	setSignalAction(&yacht)
 	yacht.Run()
 

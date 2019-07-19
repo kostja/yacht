@@ -4,8 +4,12 @@ import "log"
 import "os"
 import "os/signal"
 import "fmt"
+
+import "path"
+import "path/filepath"
 import "strings"
 import "github.com/spf13/pflag"
+import "github.com/spf13/viper"
 
 //import "bufio"
 
@@ -34,9 +38,57 @@ type Env struct {
 	uri string
 }
 
+func (env *Env) configure() {
+	// Look for .yacht.yml or .yacht.json in ~
+	//
+	viper.SetConfigName(".yacht") // name of config file (without extension)
+	viper.AddConfigPath("$HOME/")
+
+	// Helper structures to match the nested json/yaml of the config
+	// file. The names have to be uppercased for marshalling
+	type Scylla struct {
+		Builddir string
+		Srcdir   string
+	}
+	type Configuration struct {
+		Scylla Scylla
+		Vardir string
+	}
+
+	cwd, _ := os.Getwd()
+
+	// Fill with defaults in case the config file is absent or empty
+	configuration := Configuration{
+		Vardir: cwd,
+		Scylla: Scylla{
+			Builddir: path.Join(os.Getenv("HOME"), "scylla/build/dev"),
+			Srcdir:   path.Join(os.Getenv("HOME"), "scylla/tests"),
+		},
+	}
+	// Check if a config file is present
+	if err := viper.ReadInConfig(); err == nil {
+		fmt.Printf("Using configuration from %s\n", viper.ConfigFileUsed())
+		// Parse the config file
+		if err := viper.Unmarshal(&configuration); err != nil {
+			log.Fatalf("Parsing configuration failed: %v", err)
+		}
+	} else if _, ok := err.(viper.ConfigFileNotFoundError); ok {
+		// Configuration file not found
+	} else {
+		// Configuration file is not accessible
+		log.Fatalf("Error reading config file %s:\n%v",
+			viper.ConfigFileUsed(), err)
+	}
+	env.builddir, _ = filepath.Abs(configuration.Scylla.Builddir)
+	env.srcdir, _ = filepath.Abs(configuration.Scylla.Srcdir)
+	env.vardir, _ = filepath.Abs(configuration.Vardir)
+}
+
 // Parse command line and configuration options and print
 // usage if necessary
 func (env *Env) Usage() {
+	env.configure()
+
 	pflag.BoolVar(&env.force, "force", false,
 		`Go on with other tests in case of an individual test failure.
 Default: false`)
@@ -58,6 +110,7 @@ Positional arguments:
 	}
 	pflag.Parse()
 	env.filters = pflag.Args()
+	log.Println(env)
 }
 
 // An artefact is anything left by a test or suite while
@@ -143,14 +196,12 @@ func setSignalAction(yacht *Yacht) {
 	go func() {
 		for sig := range c {
 			yacht.TearDown()
-			log.Fatal("Got signal %v, exiting", sig)
+			log.Fatalf("Got signal %v, exiting", sig)
 		}
 	}()
 }
 
 func (yacht *Yacht) PrintGreeting() {
-	fmt.Println("Started", strings.Join(os.Args[:], " "))
-	fmt.Println(yacht.env.filters)
 }
 
 func (yacht *Yacht) PrintSummary() {
@@ -176,6 +227,7 @@ func (yacht *Yacht) Run() {
 }
 
 func main() {
+	fmt.Println("Started", strings.Join(os.Args[:], " "))
 
 	var env Env
 	env.Usage()

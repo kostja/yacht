@@ -1,0 +1,12 @@
+# Expect other sections in the future
+scylla:
+# A path to scylla binary
+# default is ${HOME}/scylla/build/dev
+    builddir: /home/kostja/work/scylla/scylla/build/dev
+# A path to the directory with test suites
+# default is ${HOME}/scylla/tests
+    srcdir: /home/kostja/work/scylla/scylla/tests
+# A directory to create temporary clusters in,
+# default is $CWD of yacht
+vardir: .
+

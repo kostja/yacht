@@ -77,8 +77,9 @@ func (env *Env) configure() {
 	// the server binary and test sources.
 	// Look for .yacht.yml or .yacht.json in the home directory
 	//
-	viper.SetConfigName(".yacht") // name of config file (without extension)
-	viper.AddConfigPath("$HOME/")
+	env_cfg := viper.New()
+	env_cfg.SetConfigName(".yacht") // name of config file (without extension)
+	env_cfg.AddConfigPath("$HOME/")
 
 	// Helper structures to match the nested json/yaml of the configuration
 	// file. The names have to be uppercased for Go introspection to work.
@@ -102,10 +103,10 @@ func (env *Env) configure() {
 		},
 	}
 	// Check if a config file is present
-	if err := viper.ReadInConfig(); err == nil {
-		fmt.Printf("Using configuration file %s\n", viper.ConfigFileUsed())
+	if err := env_cfg.ReadInConfig(); err == nil {
+		fmt.Printf("Using configuration file %s\n", env_cfg.ConfigFileUsed())
 		// Parse the config file
-		if err := viper.Unmarshal(&configuration); err != nil {
+		if err := env_cfg.Unmarshal(&configuration); err != nil {
 			log.Fatalf("Parsing configuration failed: %v", err)
 		}
 	} else if _, ok := err.(viper.ConfigFileNotFoundError); ok {
@@ -113,11 +114,26 @@ func (env *Env) configure() {
 	} else {
 		// Configuration file is not accessible
 		log.Fatalf("Error reading config file %s:\n%v",
-			viper.ConfigFileUsed(), err)
+			env_cfg.ConfigFileUsed(), err)
 	}
 	env.builddir, _ = filepath.Abs(configuration.Scylla.Builddir)
 	env.srcdir, _ = filepath.Abs(configuration.Scylla.Srcdir)
 	env.vardir, _ = filepath.Abs(configuration.Vardir)
+	var check_dir = func(name string, value string) {
+		var msg string = "Incorrect configuration setting for %s: %v\n"
+		st, err := os.Stat(value)
+		if err != nil {
+			fmt.Printf(msg, name, err)
+		} else if st.IsDir() == false {
+			fmt.Printf(msg, name, fmt.Sprintf("%s is not a directory", value))
+		} else {
+			return
+		}
+		os.Exit(1)
+	}
+	check_dir("scylla.srcdir", env.srcdir)
+	check_dir("scylla.builddir", env.builddir)
+	// vardir is ok to not exist
 }
 
 // Parse command line and configuration options and print
@@ -254,7 +270,7 @@ func (yacht *Yacht) PrintSummary() {
 // directory to the suite inventory
 func (yacht *Yacht) findSuites() {
 
-	fmt.Printf("Looking for suites at %s", yacht.env.srcdir)
+	fmt.Printf("Looking for suites at %s\n", yacht.env.srcdir)
 	files, err := filepath.Glob(path.Join(yacht.env.srcdir, "*"))
 	if err != nil {
 		log.Fatalf("Failed to find suites in %s: %v", yacht.env.srcdir, err)
@@ -270,9 +286,9 @@ func (yacht *Yacht) findSuites() {
 		if st.IsDir() == false {
 			continue
 		}
-		suite_config := viper.New()
-		suite_config.SetConfigName("suite")
-		suite_config.AddConfigPath(path)
+		suite_cfg := viper.New()
+		suite_cfg.SetConfigName("suite")
+		suite_cfg.AddConfigPath(path)
 		// Every suite.yaml config must have a suite type and an
 		// optional description.
 		type BasicSuiteConfiguration struct {
@@ -280,16 +296,20 @@ func (yacht *Yacht) findSuites() {
 			Description string
 		}
 		// Skip files which can not be read
-		if err := viper.ReadInConfig(); err == nil {
+		if err := suite_cfg.ReadInConfig(); err == nil {
 			var cfg BasicSuiteConfiguration
-			if err := viper.Unmarshal(&cfg); err != nil {
+			if err := suite_cfg.Unmarshal(&cfg); err != nil {
 				// @todo: add warning color
 				log.Printf("Failed to read suite configuration at %s: %v", path, err)
 				continue
 			}
+			if cfg.Type == "" {
+				// There is no configuration file
+				continue
+			}
 			if cfg.Type != "cql" {
 				// @todo: add warning color
-				log.Printf("Skipping unknown suite type %v at %s",
+				log.Printf("Skipping unknown suite type '%s' at %s",
 					cfg.Type, path)
 				continue
 			}
@@ -303,14 +323,12 @@ func (yacht *Yacht) findSuites() {
 			}
 			// Only append the siute if it is not empty
 			if suite.IsEmpty() == false {
-				yacht.suites = append(yacht.suites, suite)
+				yacht.suites = append(yacht.suites, &suite)
 			}
 		}
 	}
 	if len(yacht.suites) == 0 {
-		fmt.Printf(" ...found no matching tests\n")
-	} else {
-		fmt.Printf("\n")
+		fmt.Printf(" ... found no matching suites\n")
 	}
 }
 
@@ -361,13 +379,13 @@ type cql_connection struct {
 	session *gocql.Session
 }
 
-func (c cql_connection) Execute(query string) (string, error) {
+func (c *cql_connection) Execute(query string) (string, error) {
 	// @todo handle errors and serialize results
 	c.session.Query(query).Exec()
 	return query, nil
 }
 
-func (c cql_connection) Close() {
+func (c *cql_connection) Close() {
 	c.session.Close()
 }
 
@@ -382,11 +400,11 @@ type cql_server_uri_artefact struct {
 	session *gocql.Session
 }
 
-func (a cql_server_uri_artefact) Remove() {
+func (a *cql_server_uri_artefact) Remove() {
 	a.session.Query("DROP KEYSPACE IF EXISTS yacht").Exec()
 }
 
-func (server cql_server_uri) Start(lane *Lane) error {
+func (server *cql_server_uri) Start(lane *Lane) error {
 	server.cluster = gocql.NewCluster(server.uri)
 	// Create an administrative session to prepare
 	// administrative server for testing
@@ -408,12 +426,12 @@ func (server cql_server_uri) Start(lane *Lane) error {
 	return nil
 }
 
-func (server cql_server_uri) Connect() (Connection, error) {
+func (server *cql_server_uri) Connect() (Connection, error) {
 	session, err := server.cluster.CreateSession()
 	if err != nil {
 		return nil, err
 	}
-	return cql_connection{session: session}, nil
+	return &cql_connection{session: session}, nil
 }
 
 // A suite with CQL tests
@@ -425,7 +443,7 @@ type cql_test_suite struct {
 	server      Server
 }
 
-func (suite cql_test_suite) FindTests(suite_path string, patterns []string) error {
+func (suite *cql_test_suite) FindTests(suite_path string, patterns []string) error {
 	suite.path = suite_path
 	suite.name = path.Base(suite.path)
 
@@ -434,8 +452,8 @@ func (suite cql_test_suite) FindTests(suite_path string, patterns []string) erro
 		return err
 	}
 	// @todo: say nothing if there are no tests
-	fmt.Printf("Collecting tests in '%12s' (Found %4d tests): %20s\n",
-		suite.name, len(files), suite.description)
+	fmt.Printf("Collecting tests in %16s (Found %3d tests): %20s\n",
+		fmt.Sprintf("'%s'", suite.name), len(files), suite.description)
 	for _, file := range files {
 		// @todo: filter by pattern here
 		suite.tests = append(suite.tests, cql_test_file{path: file, name: path.Base(file)})
@@ -443,16 +461,16 @@ func (suite cql_test_suite) FindTests(suite_path string, patterns []string) erro
 	return nil
 }
 
-func (suite cql_test_suite) IsEmpty() bool {
+func (suite *cql_test_suite) IsEmpty() bool {
 	return len(suite.tests) == 0
 }
 
-func (suite cql_test_suite) PrepareLane(lane *Lane) {
-	suite.server = cql_server_uri{uri: "127.0.0.1"}
+func (suite *cql_test_suite) PrepareLane(lane *Lane) {
+	suite.server = &cql_server_uri{uri: "127.0.0.1"}
 	suite.server.Start(lane)
 }
 
-func (suite cql_test_suite) Run(force bool) error {
+func (suite *cql_test_suite) Run(force bool) error {
 	c, err := suite.server.Connect()
 	if err != nil {
 		// 'force' affects .result/reject mismatch,
@@ -479,7 +497,7 @@ type cql_test_file struct {
 }
 
 // Open a file and read it line-by-line, splitting into test cases.
-func (test cql_test_file) Run(force bool, c Connection) error {
+func (test *cql_test_file) Run(force bool, c Connection) error {
 
 	// Open input file
 	file, err := os.Open(test.path)

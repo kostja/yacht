@@ -332,6 +332,19 @@ func (yacht *Yacht) findSuites() {
 	}
 }
 
+func (yacht *Yacht) PrintSuiteBeginBlurb() {
+	fmt.Printf("%s\n", strings.Repeat("=", 80))
+	fmt.Printf("LANE ")
+	fmt.Printf("%-46s", "TEST")
+	fmt.Printf("%-14s", "OPTIONS")
+	fmt.Printf("RESULT\n")
+	fmt.Printf("%s\n", strings.Repeat("-", 75))
+}
+
+func (yacht *Yacht) PrintSuiteEndBlurb() {
+	fmt.Printf("%s\n", strings.Repeat("-", 75))
+}
+
 func (yacht *Yacht) Run() int {
 
 	yacht.lane.Init("1", yacht.env.vardir)
@@ -346,11 +359,15 @@ func (yacht *Yacht) Run() int {
 		// between runs
 		yacht.lane.CleanupBeforeNextSuite()
 		// @todo: multiple lanes to run tests in parallel
+		yacht.PrintSuiteBeginBlurb()
 		suite.PrepareLane(&yacht.lane)
 		if err := suite.Run(yacht.env.force); err != nil {
 
 			rc = 1
+		} else {
+			yacht.PrintSuiteEndBlurb()
 		}
+
 		//		if err != nil && env.force == false {
 		//			break
 		//		}
@@ -452,8 +469,8 @@ func (suite *cql_test_suite) FindTests(suite_path string, patterns []string) err
 		return err
 	}
 	// @todo: say nothing if there are no tests
-	fmt.Printf("Collecting tests in %16s (Found %3d tests): %20s\n",
-		fmt.Sprintf("'%s'", suite.name), len(files), suite.description)
+	fmt.Printf("Collecting tests in %-14s (Found %3d tests): %.26s\n",
+		fmt.Sprintf("'%.12s'", suite.name), len(files), suite.description)
 	for _, file := range files {
 		// @todo: filter by pattern here
 		suite.tests = append(suite.tests, cql_test_file{path: file, name: path.Base(file)})

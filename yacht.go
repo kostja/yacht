@@ -18,12 +18,12 @@ type TestSuite interface {
 	FindTests(path string, patterns []string) error
 	IsEmpty() bool
 	PrepareLane(*Lane)
-	Run(force bool) error
+	Run(force bool) (int, error)
 }
 
 // A single test
 type TestFile interface {
-	Run(force bool, c *Connection) error
+	Run(force bool, c *Connection, lane *Lane) (int, error)
 }
 
 // An artefact is anything left by a test or suite while
@@ -332,7 +332,7 @@ func (yacht *Yacht) findSuites() {
 	}
 }
 
-func (yacht *Yacht) PrintSuiteBeginBlurb() {
+func PrintSuiteBeginBlurb() {
 	fmt.Printf("%s\n", strings.Repeat("=", 80))
 	fmt.Printf("LANE ")
 	fmt.Printf("%-46s", "TEST")
@@ -341,8 +341,12 @@ func (yacht *Yacht) PrintSuiteBeginBlurb() {
 	fmt.Printf("%s\n", strings.Repeat("-", 75))
 }
 
-func (yacht *Yacht) PrintSuiteEndBlurb() {
+func PrintSuiteEndBlurb() {
 	fmt.Printf("%s\n", strings.Repeat("-", 75))
+}
+
+func PrintTestBlurb(lane string, name string, options string, result string) {
+	fmt.Printf("%4s %-46s %-14s %-8s\n", lane, name, options, result)
 }
 
 func (yacht *Yacht) Run() int {
@@ -359,13 +363,14 @@ func (yacht *Yacht) Run() int {
 		// between runs
 		yacht.lane.CleanupBeforeNextSuite()
 		// @todo: multiple lanes to run tests in parallel
-		yacht.PrintSuiteBeginBlurb()
+		PrintSuiteBeginBlurb()
 		suite.PrepareLane(&yacht.lane)
-		if err := suite.Run(yacht.env.force); err != nil {
-
-			rc = 1
+		if suite_rc, err := suite.Run(yacht.env.force); err != nil {
+			log.Print(err)
+			return 1
 		} else {
-			yacht.PrintSuiteEndBlurb()
+			rc |= suite_rc
+			PrintSuiteEndBlurb()
 		}
 
 		//		if err != nil && env.force == false {
@@ -457,6 +462,7 @@ type cql_test_suite struct {
 	path        string
 	name        string
 	tests       []cql_test_file
+	lane        *Lane
 	server      Server
 }
 
@@ -483,29 +489,37 @@ func (suite *cql_test_suite) IsEmpty() bool {
 }
 
 func (suite *cql_test_suite) PrepareLane(lane *Lane) {
+	suite.lane = lane
 	suite.server = &cql_server_uri{uri: "127.0.0.1"}
 	suite.server.Start(lane)
 }
 
-func (suite *cql_test_suite) Run(force bool) error {
+func (suite *cql_test_suite) Run(force bool) (int, error) {
 	c, err := suite.server.Connect()
+	var suite_rc int = 0
 	if err != nil {
 		// 'force' affects .result/reject mismatch,
 		// but not harness failures
-		return err
+		return 0, err
 	}
 	defer c.Close()
 	for _, test := range suite.tests {
-		err := test.Run(force, c)
+		test_rc, err := test.Run(force, c)
 		if err != nil {
 			// @todo nice progress report
-			// 'force' doesn't affect internal errors
-			return err
+			return test_rc, err
 		}
+		var result string
+		if test_rc != 0 {
+			suite_rc |= test_rc
+			result = "FAIL"
+		} else {
+			result = "OK"
+		}
+		PrintTestBlurb(suite.lane.id, test.name, "", result)
 		// @todo nice output, nice progress report
-		fmt.Println("OK")
 	}
-	return nil
+	return suite_rc, nil
 }
 
 type cql_test_file struct {
@@ -514,12 +528,12 @@ type cql_test_file struct {
 }
 
 // Open a file and read it line-by-line, splitting into test cases.
-func (test *cql_test_file) Run(force bool, c Connection) error {
+func (test *cql_test_file) Run(force bool, c Connection) (int, error) {
 
 	// Open input file
 	file, err := os.Open(test.path)
 	if err != nil {
-		return err
+		return 0, err
 	}
 
 	stream := bufio.NewScanner(file)
@@ -530,9 +544,9 @@ func (test *cql_test_file) Run(force bool, c Connection) error {
 		if _, err := c.Execute(line); err != nil {
 			// @todo: access denied, lost connection
 			// should not trigger test failure with 'force'
-			return err
+			return 0, err
 		}
 		// append output to the output file
 	}
-	return nil
+	return 0, nil
 }

@@ -6,9 +6,12 @@ import "os/signal"
 import "fmt"
 import "bufio"
 
+import "time"
 import "path"
 import "path/filepath"
 import "strings"
+import "regexp"
+import "encoding/json"
 import "github.com/spf13/pflag"
 import "github.com/spf13/viper"
 import "github.com/gocql/gocql"
@@ -259,9 +262,6 @@ func setSignalAction(yacht *Yacht) {
 	}()
 }
 
-func (yacht *Yacht) PrintSummary() {
-}
-
 // Go over files in srcdir and look up suite.yaml/json
 // in everything that looks like a dir. If there is a suite
 // configuration file and it has suite type that we recocgnize,
@@ -372,13 +372,7 @@ func (yacht *Yacht) Run() int {
 			rc |= suite_rc
 			PrintSuiteEndBlurb()
 		}
-
-		//		if err != nil && env.force == false {
-		//			break
-		//		}
 	}
-	// if all OK clear the lane
-	yacht.PrintSummary()
 	return rc
 }
 
@@ -401,10 +395,66 @@ type cql_connection struct {
 	session *gocql.Session
 }
 
-func (c *cql_connection) Execute(query string) (string, error) {
-	// @todo handle errors and serialize results
-	c.session.Query(query).Exec()
-	return query, nil
+var CassandraErrorMap = map[int]string{
+	0x0000: "Server error (0x0000)",
+	0x000A: "Protocol error (0x000A)",
+	0x0100: "Bad credentials (0x0100)",
+	0x1000: "Unavailable (0x1000)",
+	0x1001: "Overloaded (0x1001)",
+	0x1002: "Bootstrapping (0x1002)",
+	0x1003: "Truncate error (0x1003)",
+	0x1100: "Write timeout (0x1100)",
+	0x1200: "Read timeout (0x1200)",
+	0x1300: "Read failure (0x1300)",
+	0x1400: "Function failure (0x1400)",
+	0x1500: "Write failure (0x1500)",
+	0x1600: "CDC write failure (0x1600)",
+	0x2000: "Syntax error (0x2000)",
+	0x2100: "Unauthorized (0x2100)",
+	0x2200: "Invalid (0x2200)",
+	0x2300: "Config error (0x2300)",
+	0x2400: "Already exists (0x2400)",
+	0x2500: "Unprepared (0x2500)",
+}
+
+func (c *cql_connection) Execute(cql string) (string, error) {
+
+	type Result struct {
+		Status  string        `json:"status"`
+		Code    string        `json:"code,omitempty"`
+		Message string        `json:"message,omitempty"`
+		Rows    []interface{} `json:"rows,omitempty"`
+	}
+	var result Result
+
+	query := c.session.Query(cql)
+	err := query.Exec()
+
+	if err == nil {
+		// todo: serialize results
+		result.Status = "OK"
+
+		iter := query.Iter()
+		for {
+			row := make(map[string]interface{})
+			if !iter.MapScan(row) {
+				break
+			}
+			result.Rows = append(result.Rows, row)
+		}
+	} else {
+		switch e := err.(type) {
+		case gocql.RequestError:
+			result.Status = "ERROR"
+			result.Code = CassandraErrorMap[e.Code()]
+			result.Message = fmt.Sprintf("%.80s", strings.Split(e.Message(), "\n")[0])
+		default:
+			// Transport error or internal driver error, propagate up
+			return "", err
+		}
+	}
+	m, _ := json.MarshalIndent(result, "", "  ")
+	return string(m), nil
 }
 
 func (c *cql_connection) Close() {
@@ -428,6 +478,7 @@ func (a *cql_server_uri_artefact) Remove() {
 
 func (server *cql_server_uri) Start(lane *Lane) error {
 	server.cluster = gocql.NewCluster(server.uri)
+	server.cluster.Timeout, _ = time.ParseDuration("30s")
 	// Create an administrative session to prepare
 	// administrative server for testing
 	session, err := server.cluster.CreateSession()
@@ -453,6 +504,7 @@ func (server *cql_server_uri) Connect() (Connection, error) {
 	if err != nil {
 		return nil, err
 	}
+	session.SetConsistency(gocql.Any)
 	return &cql_connection{session: session}, nil
 }
 
@@ -507,7 +559,7 @@ func (suite *cql_test_suite) Run(force bool) (int, error) {
 		test_rc, err := test.Run(force, c)
 		if err != nil {
 			// @todo nice progress report
-			return test_rc, err
+			return 0, err
 		}
 		var result string
 		if test_rc != 0 {
@@ -527,6 +579,13 @@ type cql_test_file struct {
 	path string
 }
 
+// matches comments and whitespace
+var commentRE = regexp.MustCompile(`^\s*((--|\/\/).*)?$`)
+
+func isCQLComment(line string) bool {
+	return commentRE.MatchString(line)
+}
+
 // Open a file and read it line-by-line, splitting into test cases.
 func (test *cql_test_file) Run(force bool, c Connection) (int, error) {
 
@@ -541,12 +600,17 @@ func (test *cql_test_file) Run(force bool, c Connection) (int, error) {
 	// @todo: fail if found no tests
 	for stream.Scan() {
 		line := stream.Text()
-		if _, err := c.Execute(line); err != nil {
+		var output string
+		fmt.Println(line)
+		if isCQLComment(line) {
+			continue
+		}
+		if output, err = c.Execute(line); err != nil {
 			// @todo: access denied, lost connection
 			// should not trigger test failure with 'force'
 			return 0, err
 		}
-		// append output to the output file
+		fmt.Println(output)
 	}
 	return 0, nil
 }

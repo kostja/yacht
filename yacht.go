@@ -490,7 +490,7 @@ func (server *cql_server_uri) Start(lane *Lane) error {
 	artefact.Remove()
 	// Create a keyspace for testing
 	err = session.Query(`CREATE KEYSPACE IF NOT EXISTS yacht WITH REPLICATION =
-{ 'class': 'NetworkTopologyStrategy' } AND DURABLE_WRITES=true`).Exec()
+{ 'class': 'SimpleStrategy', 'replication_factor' : 1 } AND DURABLE_WRITES=true`).Exec()
 	if err != nil {
 		return err
 	}
@@ -504,7 +504,7 @@ func (server *cql_server_uri) Connect() (Connection, error) {
 	if err != nil {
 		return nil, err
 	}
-	session.SetConsistency(gocql.Any)
+	//	session.SetConsistency(gocql.Any)
 	return &cql_connection{session: session}, nil
 }
 

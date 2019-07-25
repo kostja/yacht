@@ -12,21 +12,24 @@ import "path/filepath"
 import "strings"
 import "regexp"
 import "encoding/json"
+import "github.com/ansel1/merry"
 import "github.com/spf13/pflag"
 import "github.com/spf13/viper"
 import "github.com/gocql/gocql"
+import "github.com/udhos/equalfile"
 
 // A directory with tests
 type TestSuite interface {
 	FindTests(path string, patterns []string) error
 	IsEmpty() bool
 	PrepareLane(*Lane)
-	Run(force bool) (int, error)
+	RunSuite(force bool) (int, error)
+	FailedTests() []string
 }
 
 // A single test
 type TestFile interface {
-	Run(force bool, c *Connection, lane *Lane) (int, error)
+	RunTest(force bool, c *Connection, lane *Lane) (int, error)
 }
 
 // An artefact is anything left by a test or suite while
@@ -356,6 +359,8 @@ func (yacht *Yacht) Run() int {
 
 	yacht.findSuites()
 
+	var failed []string
+
 	for _, suite := range yacht.suites {
 		// Clear the lane between test suites
 		// Note, it's done before the suite is started,
@@ -365,13 +370,17 @@ func (yacht *Yacht) Run() int {
 		// @todo: multiple lanes to run tests in parallel
 		PrintSuiteBeginBlurb()
 		suite.PrepareLane(&yacht.lane)
-		if suite_rc, err := suite.Run(yacht.env.force); err != nil {
-			log.Print(err)
+		if suite_rc, err := suite.RunSuite(yacht.env.force); err != nil {
+			log.Printf("%+v", err)
 			return 1
 		} else {
 			rc |= suite_rc
+			failed = append(failed, suite.FailedTests()...)
 			PrintSuiteEndBlurb()
 		}
+	}
+	if len(failed) != 0 {
+		fmt.Printf("Not all tests executeed successfully: %v\n", failed)
 	}
 	return rc
 }
@@ -420,10 +429,12 @@ var CassandraErrorMap = map[int]string{
 func (c *cql_connection) Execute(cql string) (string, error) {
 
 	type Result struct {
-		Status  string        `json:"status"`
-		Code    string        `json:"code,omitempty"`
-		Message string        `json:"message,omitempty"`
-		Rows    []interface{} `json:"rows,omitempty"`
+		Status   string        `json:"status"`
+		Code     string        `json:"code,omitempty"`
+		Message  string        `json:"message,omitempty"`
+		Warnings []string      `json:"warnings,omitempty"`
+		Meta     []interface{} `json:"meta,omitempty"`
+		Rows     []interface{} `json:"rows,omitempty"`
 	}
 	var result Result
 
@@ -435,12 +446,17 @@ func (c *cql_connection) Execute(cql string) (string, error) {
 		result.Status = "OK"
 
 		iter := query.Iter()
+		result.Warnings = iter.Warnings()
+		for _, column := range iter.Columns() {
+			result.Meta = append(result.Meta,
+				map[string]string{"type": column.TypeInfo.Type().String(), "name": column.Name})
+		}
+		row, _ := iter.RowData()
 		for {
-			row := make(map[string]interface{})
-			if !iter.MapScan(row) {
+			if !iter.Scan(row.Values...) {
 				break
 			}
-			result.Rows = append(result.Rows, row)
+			result.Rows = append(result.Rows, row.Values)
 		}
 	} else {
 		switch e := err.(type) {
@@ -450,7 +466,7 @@ func (c *cql_connection) Execute(cql string) (string, error) {
 			result.Message = fmt.Sprintf("%.80s", strings.Split(e.Message(), "\n")[0])
 		default:
 			// Transport error or internal driver error, propagate up
-			return "", err
+			return "", merry.Wrap(err)
 		}
 	}
 	m, _ := json.MarshalIndent(result, "", "  ")
@@ -483,7 +499,7 @@ func (server *cql_server_uri) Start(lane *Lane) error {
 	// administrative server for testing
 	session, err := server.cluster.CreateSession()
 	if err != nil {
-		return err
+		return merry.Wrap(err)
 	}
 	artefact := cql_server_uri_artefact{session: session}
 	// Cleanup before running the suit
@@ -492,7 +508,7 @@ func (server *cql_server_uri) Start(lane *Lane) error {
 	err = session.Query(`CREATE KEYSPACE IF NOT EXISTS yacht WITH REPLICATION =
 { 'class': 'SimpleStrategy', 'replication_factor' : 1 } AND DURABLE_WRITES=true`).Exec()
 	if err != nil {
-		return err
+		return merry.Wrap(err)
 	}
 	server.cluster.Keyspace = "yacht"
 	lane.AddSuiteArtefact(&artefact)
@@ -502,7 +518,7 @@ func (server *cql_server_uri) Start(lane *Lane) error {
 func (server *cql_server_uri) Connect() (Connection, error) {
 	session, err := server.cluster.CreateSession()
 	if err != nil {
-		return nil, err
+		return nil, merry.Wrap(err)
 	}
 	//	session.SetConsistency(gocql.Any)
 	return &cql_connection{session: session}, nil
@@ -514,8 +530,13 @@ type cql_test_suite struct {
 	path        string
 	name        string
 	tests       []cql_test_file
+	failed      []string
 	lane        *Lane
 	server      Server
+}
+
+func (suite *cql_test_suite) FailedTests() []string {
+	return suite.failed
 }
 
 func (suite *cql_test_suite) FindTests(suite_path string, patterns []string) error {
@@ -524,14 +545,18 @@ func (suite *cql_test_suite) FindTests(suite_path string, patterns []string) err
 
 	files, err := filepath.Glob(path.Join(suite.path, "*.test.cql"))
 	if err != nil {
-		return err
+		return merry.Wrap(err)
 	}
 	// @todo: say nothing if there are no tests
 	fmt.Printf("Collecting tests in %-14s (Found %3d tests): %.26s\n",
 		fmt.Sprintf("'%.12s'", suite.name), len(files), suite.description)
 	for _, file := range files {
 		// @todo: filter by pattern here
-		suite.tests = append(suite.tests, cql_test_file{path: file, name: path.Base(file)})
+		test := cql_test_file{
+			path: file,
+			name: path.Base(file),
+		}
+		suite.tests = append(suite.tests, test)
 	}
 	return nil
 }
@@ -544,73 +569,113 @@ func (suite *cql_test_suite) PrepareLane(lane *Lane) {
 	suite.lane = lane
 	suite.server = &cql_server_uri{uri: "127.0.0.1"}
 	suite.server.Start(lane)
+	for i, _ := range suite.tests {
+		suite.tests[i].PrepareLane(lane)
+	}
 }
 
-func (suite *cql_test_suite) Run(force bool) (int, error) {
+func (suite *cql_test_suite) RunSuite(force bool) (int, error) {
 	c, err := suite.server.Connect()
 	var suite_rc int = 0
 	if err != nil {
 		// 'force' affects .result/reject mismatch,
 		// but not harness failures
-		return 0, err
+		return 0, merry.Wrap(err)
 	}
 	defer c.Close()
 	for _, test := range suite.tests {
-		test_rc, err := test.Run(force, c)
+		test_rc, err := test.RunTest(force, c)
 		if err != nil {
 			// @todo nice progress report
-			return 0, err
+			return 0, merry.Wrap(err)
 		}
-		var result string
-		if test_rc != 0 {
-			suite_rc |= test_rc
-			result = "FAIL"
-		} else {
-			result = "OK"
+		PrintTestBlurb(suite.lane.id, test.name, "", test_rc)
+		if test_rc != "OK" && test_rc != "NEW" {
+			suite_rc = 1
+			suite.failed = append(suite.failed, path.Join(suite.name, test.name))
+			if force == false {
+				break
+			}
 		}
-		PrintTestBlurb(suite.lane.id, test.name, "", result)
 		// @todo nice output, nice progress report
 	}
 	return suite_rc, nil
 }
 
 type cql_test_file struct {
+	// Temp name
 	name string
+	// Path to test case
 	path string
+	// Where to store temporary state
+	vardir string
+	// Path to a temporary output file in vardir
+	tmp string
+	// Path to result file in srcdir
+	result string
+	// Path to reject file in srcdir
+	reject string
+	// True if the test output is the same as pre-recorded one
+	isEqualResult bool
 }
 
 // matches comments and whitespace
 var commentRE = regexp.MustCompile(`^\s*((--|\/\/).*)?$`)
+var testCQLRE = regexp.MustCompile(`test\.cql$`)
+var resultRE = regexp.MustCompile(`result$`)
 
-func isCQLComment(line string) bool {
-	return commentRE.MatchString(line)
+func (test *cql_test_file) PrepareLane(lane *Lane) {
+	test.vardir = lane.Dir()
+	test.tmp = path.Join(test.vardir, testCQLRE.ReplaceAllString(test.name, `result`))
+	test.result = testCQLRE.ReplaceAllString(test.path, `result`)
+	test.reject = resultRE.ReplaceAllString(test.result, `reject`)
 }
 
 // Open a file and read it line-by-line, splitting into test cases.
-func (test *cql_test_file) Run(force bool, c Connection) (int, error) {
+func (test *cql_test_file) RunTest(force bool, c Connection) (string, error) {
 
 	// Open input file
-	file, err := os.Open(test.path)
+	test_file, err := os.Open(test.path)
 	if err != nil {
-		return 0, err
+		return "", merry.Wrap(err)
 	}
+	defer test_file.Close()
 
-	stream := bufio.NewScanner(file)
+	// Open a temporary output file
+	tmp_file, err := os.OpenFile(test.tmp,
+		os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
+	if err != nil {
+		return "", merry.Prepend(err, test.tmp)
+	}
+	defer tmp_file.Close()
 
-	// @todo: fail if found no tests
-	for stream.Scan() {
-		line := stream.Text()
-		var output string
-		fmt.Println(line)
-		if isCQLComment(line) {
+	input := bufio.NewScanner(test_file)
+	output := bufio.NewWriter(tmp_file)
+
+	// @todo: fail if found no test cases in a file
+	for input.Scan() {
+		line := input.Text()
+		fmt.Fprintln(output, line)
+		if commentRE.MatchString(line) {
 			continue
 		}
-		if output, err = c.Execute(line); err != nil {
+		if response, err := c.Execute(line); err == nil {
+			fmt.Fprintln(output, response)
+		} else {
 			// @todo: access denied, lost connection
 			// should not trigger test failure with 'force'
-			return 0, err
+			return "", merry.Wrap(err)
 		}
-		fmt.Println(output)
 	}
-	return 0, nil
+	output.Flush()
+
+	if _, err := os.Stat(test.result); err == nil {
+		// Compare output
+		test.isEqualResult, _ = equalfile.New(nil, equalfile.Options{}).CompareFile(
+			test.tmp, test.result)
+	}
+	if test.isEqualResult {
+		return "OK", nil
+	}
+	return "FAIL", nil
 }

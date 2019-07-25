@@ -7,18 +7,21 @@ import "fmt"
 import "bufio"
 
 import "time"
+
+import "reflect"
+import "bytes"
 import "path"
 import "path/filepath"
 import "strings"
 import "regexp"
 import "io/ioutil"
-import "encoding/json"
 import "github.com/ansel1/merry"
 import "github.com/spf13/pflag"
 import "github.com/spf13/viper"
 import "github.com/gocql/gocql"
 import "github.com/udhos/equalfile"
 import "github.com/pmezard/go-difflib/difflib"
+import "github.com/olekukonko/tablewriter"
 
 // A directory with tests
 type TestSuite interface {
@@ -428,51 +431,87 @@ var CassandraErrorMap = map[int]string{
 	0x2500: "Unprepared (0x2500)",
 }
 
+// Result of execution of a CQL statement
+type CQLResult struct {
+	status   string
+	code     string
+	message  string
+	warnings []string
+	names    []string
+	types    []string
+	rows     [][]string
+}
+
+func (result *CQLResult) String() string {
+	var offset = "  "
+	buf := new(bytes.Buffer)
+	if result.status != "OK" {
+		fmt.Fprintf(buf, "%s%7s: %s\n", offset, "status", result.status)
+		fmt.Fprintf(buf, "%s%7s: %s\n", offset, "code", result.code)
+		fmt.Fprintf(buf, "%s%7s: %s\n", offset, "message", result.message)
+		return string(buf.Bytes())
+	}
+	if len(result.warnings) != 0 {
+		fmt.Fprintf(buf, "%s%8s: %+v\n", offset, "warnings", result.warnings)
+	}
+	if len(result.rows) != 0 {
+		fmt.Fprint(buf, offset)
+		table := tablewriter.NewWriter(buf)
+		table.SetHeader(result.names)
+		// Shift all rows by offset
+		table.SetNewLine("\n" + offset)
+		for _, v := range result.rows {
+			table.Append(v)
+		}
+		table.Render() // Send output
+		// Trim last offset
+		buf.Truncate(buf.Len() - len(offset))
+	} else {
+		fmt.Fprint(buf, "  OK\n")
+	}
+	return string(buf.Bytes())
+}
+
 func (c *cql_connection) Execute(cql string) (string, error) {
 
-	type Result struct {
-		Status   string        `json:"status"`
-		Code     string        `json:"code,omitempty"`
-		Message  string        `json:"message,omitempty"`
-		Warnings []string      `json:"warnings,omitempty"`
-		Meta     []interface{} `json:"meta,omitempty"`
-		Rows     []interface{} `json:"rows,omitempty"`
-	}
-	var result Result
+	var result CQLResult
 
 	query := c.session.Query(cql)
 	err := query.Exec()
 
 	if err == nil {
 		// todo: serialize results
-		result.Status = "OK"
+		result.status = "OK"
 
 		iter := query.Iter()
-		result.Warnings = iter.Warnings()
+		result.warnings = iter.Warnings()
 		for _, column := range iter.Columns() {
-			result.Meta = append(result.Meta,
-				map[string]string{"type": column.TypeInfo.Type().String(), "name": column.Name})
+			result.names = append(result.names, column.Name)
+			result.types = append(result.types, column.TypeInfo.Type().String())
 		}
 		row, _ := iter.RowData()
 		for {
 			if !iter.Scan(row.Values...) {
 				break
 			}
-			result.Rows = append(result.Rows, row.Values)
+			strrow := make([]string, len(row.Values))
+			for i, v := range row.Values {
+				strrow[i] = fmt.Sprint(reflect.ValueOf(v).Elem())
+			}
+			result.rows = append(result.rows, strrow)
 		}
 	} else {
 		switch e := err.(type) {
 		case gocql.RequestError:
-			result.Status = "ERROR"
-			result.Code = CassandraErrorMap[e.Code()]
-			result.Message = fmt.Sprintf("%.80s", strings.Split(e.Message(), "\n")[0])
+			result.status = "ERROR"
+			result.code = CassandraErrorMap[e.Code()]
+			result.message = fmt.Sprintf("%.80s", strings.Split(e.Message(), "\n")[0])
 		default:
 			// Transport error or internal driver error, propagate up
 			return "", merry.Wrap(err)
 		}
 	}
-	m, _ := json.MarshalIndent(result, "", "  ")
-	return string(m), nil
+	return result.String(), nil
 }
 
 func (c *cql_connection) Close() {
@@ -665,7 +704,7 @@ func (test *cql_test_file) RunTest(force bool, c Connection) (string, error) {
 			continue
 		}
 		if response, err := c.Execute(line); err == nil {
-			fmt.Fprintln(output, response)
+			fmt.Fprint(output, response)
 		} else {
 			// @todo: access denied, lost connection
 			// should not trigger test failure with 'force'

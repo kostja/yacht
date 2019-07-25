@@ -496,7 +496,7 @@ func (c *cql_connection) Execute(cql string) (string, error) {
 			}
 			strrow := make([]string, len(row.Values))
 			for i, v := range row.Values {
-				strrow[i] = fmt.Sprint(reflect.ValueOf(v).Elem())
+				strrow[i] = fmt.Sprint(reflect.Indirect(reflect.ValueOf(v)))
 			}
 			result.rows = append(result.rows, strrow)
 		}

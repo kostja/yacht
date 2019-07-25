@@ -11,12 +11,14 @@ import "path"
 import "path/filepath"
 import "strings"
 import "regexp"
+import "io/ioutil"
 import "encoding/json"
 import "github.com/ansel1/merry"
 import "github.com/spf13/pflag"
 import "github.com/spf13/viper"
 import "github.com/gocql/gocql"
 import "github.com/udhos/equalfile"
+import "github.com/pmezard/go-difflib/difflib"
 
 // A directory with tests
 type TestSuite interface {
@@ -379,7 +381,7 @@ func (yacht *Yacht) Run() int {
 			PrintSuiteEndBlurb()
 		}
 	}
-	if len(failed) != 0 {
+	if yacht.env.force == true && len(failed) != 0 {
 		fmt.Printf("Not all tests executeed successfully: %v\n", failed)
 	}
 	return rc
@@ -590,7 +592,8 @@ func (suite *cql_test_suite) RunSuite(force bool) (int, error) {
 			return 0, merry.Wrap(err)
 		}
 		PrintTestBlurb(suite.lane.id, test.name, "", test_rc)
-		if test_rc != "OK" && test_rc != "NEW" {
+		if test_rc == "FAIL" {
+			test.PrintUniDiff()
 			suite_rc = 1
 			suite.failed = append(suite.failed, path.Join(suite.name, test.name))
 			if force == false {
@@ -686,10 +689,38 @@ func (test *cql_test_file) RunTest(force bool, c Connection) (string, error) {
 		return "OK", nil
 	}
 	if test.isNew {
+		// Create a result file when running for the first time
 		if err := os.Rename(test.tmp, test.result); err != nil {
 			return "", merry.Wrap(err)
 		}
 		return "NEW", nil
 	}
+	if err := os.Rename(test.tmp, test.reject); err != nil {
+		return "", merry.Wrap(err)
+	}
+	// Result content mismatch
 	return "FAIL", nil
+}
+
+func (test *cql_test_file) PrintUniDiff() {
+
+	var result, reject []byte
+	var err error
+
+	if result, err = ioutil.ReadFile(test.result); err != nil {
+		return
+	}
+	if reject, err = ioutil.ReadFile(test.reject); err != nil {
+		return
+	}
+	diff := difflib.UnifiedDiff{
+		A:        difflib.SplitLines(string(result)),
+		B:        difflib.SplitLines(string(reject)),
+		FromFile: test.result,
+		ToFile:   test.reject,
+		Context:  3,
+	}
+	if text, err := difflib.GetUnifiedDiffString(diff); err == nil {
+		fmt.Printf(text)
+	}
 }

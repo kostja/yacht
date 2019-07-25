@@ -617,6 +617,8 @@ type cql_test_file struct {
 	reject string
 	// True if the test output is the same as pre-recorded one
 	isEqualResult bool
+	// True if the the pre-recorded output did not exist
+	isNew bool
 }
 
 // matches comments and whitespace
@@ -673,9 +675,21 @@ func (test *cql_test_file) RunTest(force bool, c Connection) (string, error) {
 		// Compare output
 		test.isEqualResult, _ = equalfile.New(nil, equalfile.Options{}).CompareFile(
 			test.tmp, test.result)
+	} else if os.IsNotExist(err) {
+		test.isNew = true
+	} else {
+		return "", merry.Wrap(err)
 	}
+
 	if test.isEqualResult {
+		os.Remove(test.tmp)
 		return "OK", nil
+	}
+	if test.isNew {
+		if err := os.Rename(test.tmp, test.result); err != nil {
+			return "", merry.Wrap(err)
+		}
+		return "NEW", nil
 	}
 	return "FAIL", nil
 }

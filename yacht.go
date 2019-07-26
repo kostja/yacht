@@ -22,6 +22,7 @@ import "github.com/gocql/gocql"
 import "github.com/udhos/equalfile"
 import "github.com/pmezard/go-difflib/difflib"
 import "github.com/olekukonko/tablewriter"
+import "github.com/fatih/color"
 
 // A directory with tests
 type TestSuite interface {
@@ -61,6 +62,49 @@ type Connection interface {
 type Server interface {
 	Start(lane *Lane) error
 	Connect() (Connection, error)
+}
+
+type ColoredSprintf func(format string, a ...interface{}) string
+
+func CreateColor(attributes ...color.Attribute) ColoredSprintf {
+	var c = color.New()
+	for _, attribute := range attributes {
+		c.Add(attribute)
+	}
+	return func(format string, a ...interface{}) string {
+		return c.Sprintf(format, a...)
+	}
+}
+
+// A color palette for highlighting harness output
+type Palette struct {
+	// Passed test
+	pass ColoredSprintf
+	// Failed test
+	fail ColoredSprintf
+	// New tes
+	new_ ColoredSprintf
+	// Skipped or disabled test
+	skip ColoredSprintf
+	// Path
+	path ColoredSprintf
+	// A warning or important information
+	warn ColoredSprintf
+	// Critical error
+	crit ColoredSprintf
+	// Normal output - this solely for documenting purposes,
+	// don't use, use fmt.*print* instead
+	info ColoredSprintf
+}
+
+var palette = Palette{
+	pass: CreateColor(color.FgGreen),
+	fail: CreateColor(color.FgRed),
+	new_: CreateColor(color.FgBlue),
+	skip: CreateColor(color.Faint),
+	path: CreateColor(color.Bold),
+	warn: CreateColor(color.FgYellow),
+	crit: CreateColor(color.FgRed),
 }
 
 // Yacht running environment.
@@ -116,7 +160,8 @@ func (env *Env) configure() {
 	}
 	// Check if a config file is present
 	if err := env_cfg.ReadInConfig(); err == nil {
-		fmt.Printf("Using configuration file %s\n", env_cfg.ConfigFileUsed())
+		fmt.Printf("Using configuration file %s\n",
+			palette.path(env_cfg.ConfigFileUsed()))
 		// Parse the config file
 		if err := env_cfg.Unmarshal(&configuration); err != nil {
 			log.Fatalf("Parsing configuration failed: %v", err)

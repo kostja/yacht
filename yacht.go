@@ -34,7 +34,8 @@ type TestSuite interface {
 
 // A single test
 type TestFile interface {
-	RunTest(force bool, c *Connection, lane *Lane) (int, error)
+	PrepareLane(lane *Lane)
+	RunTest(force bool, c Connection) (string, error)
 }
 
 // An artefact is anything left by a test or suite while
@@ -376,7 +377,7 @@ func (yacht *Yacht) Run() int {
 		PrintSuiteBeginBlurb()
 		suite.PrepareLane(&yacht.lane)
 		if suite_rc, err := suite.RunSuite(yacht.env.force); err != nil {
-			log.Printf("%+v", err)
+			log.Printf("yacht failure: %+v", err)
 			return 1
 		} else {
 			rc |= suite_rc
@@ -620,14 +621,13 @@ func (suite *cql_test_suite) RunSuite(force bool) (int, error) {
 	var suite_rc int = 0
 	if err != nil {
 		// 'force' affects .result/reject mismatch,
-		// but not harness failures
+		// but not harness or infrastructure failures
 		return 0, merry.Wrap(err)
 	}
 	defer c.Close()
 	for _, test := range suite.tests {
 		test_rc, err := test.RunTest(force, c)
 		if err != nil {
-			// @todo nice progress report
 			return 0, merry.Wrap(err)
 		}
 		PrintTestBlurb(suite.lane.id, test.name, "", test_rc)
@@ -639,7 +639,6 @@ func (suite *cql_test_suite) RunSuite(force bool) (int, error) {
 				break
 			}
 		}
-		// @todo nice output, nice progress report
 	}
 	return suite_rc, nil
 }

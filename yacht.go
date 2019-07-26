@@ -71,40 +71,44 @@ func CreateColor(attributes ...color.Attribute) ColoredSprintf {
 	for _, attribute := range attributes {
 		c.Add(attribute)
 	}
-	return func(format string, a ...interface{}) string {
-		return c.Sprintf(format, a...)
-	}
+	return c.SprintfFunc()
 }
 
 // A color palette for highlighting harness output
 type Palette struct {
 	// Passed test
-	pass ColoredSprintf
+	Pass ColoredSprintf
 	// Failed test
-	fail ColoredSprintf
+	Fail ColoredSprintf
 	// New tes
-	new_ ColoredSprintf
+	New ColoredSprintf
 	// Skipped or disabled test
-	skip ColoredSprintf
+	Skip ColoredSprintf
 	// Path
-	path ColoredSprintf
+	Path ColoredSprintf
+	// diff +
+	DiffIn ColoredSprintf
+	// diff -
+	DiffOut ColoredSprintf
 	// A warning or important information
-	warn ColoredSprintf
+	Warn ColoredSprintf
 	// Critical error
-	crit ColoredSprintf
+	Crit ColoredSprintf
 	// Normal output - this solely for documenting purposes,
 	// don't use, use fmt.*print* instead
-	info ColoredSprintf
+	Info ColoredSprintf
 }
 
 var palette = Palette{
-	pass: CreateColor(color.FgGreen),
-	fail: CreateColor(color.FgRed),
-	new_: CreateColor(color.FgBlue),
-	skip: CreateColor(color.Faint),
-	path: CreateColor(color.Bold),
-	warn: CreateColor(color.FgYellow),
-	crit: CreateColor(color.FgRed),
+	Pass:    CreateColor(color.FgGreen),
+	Fail:    CreateColor(color.FgRed),
+	New:     CreateColor(color.FgBlue),
+	Skip:    CreateColor(color.Faint),
+	Path:    CreateColor(color.Bold),
+	DiffIn:  CreateColor(color.FgGreen),
+	DiffOut: CreateColor(color.FgRed),
+	Warn:    CreateColor(color.FgYellow),
+	Crit:    CreateColor(color.FgRed),
 }
 
 // Yacht running environment.
@@ -161,7 +165,7 @@ func (env *Env) configure() {
 	// Check if a config file is present
 	if err := env_cfg.ReadInConfig(); err == nil {
 		fmt.Printf("Using configuration file %s\n",
-			palette.path(env_cfg.ConfigFileUsed()))
+			palette.Path(env_cfg.ConfigFileUsed()))
 		// Parse the config file
 		if err := env_cfg.Unmarshal(&configuration); err != nil {
 			log.Fatalf("Parsing configuration failed: %v", err)
@@ -328,7 +332,7 @@ func setSignalAction(yacht *Yacht) {
 // directory to the suite inventory
 func (yacht *Yacht) findSuites() {
 
-	fmt.Printf("Looking for suites at %s\n", yacht.env.srcdir)
+	fmt.Printf("Looking for suites at %s\n", palette.Path(yacht.env.srcdir))
 	files, err := filepath.Glob(path.Join(yacht.env.srcdir, "*"))
 	if err != nil {
 		log.Fatalf("Failed to find suites in %s: %v", yacht.env.srcdir, err)
@@ -394,8 +398,9 @@ func PrintSuiteBeginBlurb() {
 	fmt.Printf("%s\n", strings.Repeat("=", 80))
 	fmt.Printf("LANE ")
 	fmt.Printf("%-46s", "TEST")
-	fmt.Printf("%-14s", "OPTIONS")
-	fmt.Printf("RESULT\n")
+	fmt.Printf(palette.Warn("%-14s", "OPTIONS"))
+	fmt.Printf(palette.Pass("RESULT"))
+	fmt.Printf("\n")
 	fmt.Printf("%s\n", strings.Repeat("-", 75))
 }
 
@@ -404,6 +409,16 @@ func PrintSuiteEndBlurb() {
 }
 
 func PrintTestBlurb(lane string, name string, options string, result string) {
+	switch result {
+	case "OK":
+		result = palette.Pass(result)
+	case "FAIL":
+		result = palette.Fail(result)
+	case "NEW":
+		result = palette.New(result)
+	default:
+		result = palette.Skip(result)
+	}
 	fmt.Printf("%4s %-46s %-14s %-8s\n", lane, name, options, result)
 }
 
@@ -434,8 +449,12 @@ func (yacht *Yacht) Run() int {
 			PrintSuiteEndBlurb()
 		}
 	}
-	if yacht.env.force == true && len(failed) != 0 {
-		fmt.Printf("Not all tests executeed successfully: %v\n", failed)
+	if len(failed) != 0 {
+		if yacht.env.force == true {
+			fmt.Printf(palette.Warn("Not all tests executeed successfully: %v\n", failed))
+		} else {
+			fmt.Printf("%s %s\n", palette.Crit("Test failed: "), palette.Path(failed[0]))
+		}
 	}
 	return rc
 }
@@ -792,6 +811,25 @@ func (test *cql_test_file) RunTest(force bool, c Connection) (string, error) {
 	return "FAIL", nil
 }
 
+var inRE = regexp.MustCompile(`^\+.*$`)
+var outRE = regexp.MustCompile(`^\-.*$`)
+
+func TrimAndColorizeDiff(diff string) string {
+	var lines = strings.Split(diff, "\n")
+	if len(lines) > 60 {
+		lines = lines[:60]
+	}
+	// Skip the first two lines of the diff
+	for i := 2; i < len(lines); i++ {
+		if inRE.MatchString(lines[i]) {
+			lines[i] = palette.DiffIn("%s", lines[i])
+		} else if outRE.MatchString(lines[i]) {
+			lines[i] = palette.DiffOut("%s", lines[i])
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
 func (test *cql_test_file) PrintUniDiff() {
 
 	var result, reject []byte
@@ -806,11 +844,11 @@ func (test *cql_test_file) PrintUniDiff() {
 	diff := difflib.UnifiedDiff{
 		A:        difflib.SplitLines(string(result)),
 		B:        difflib.SplitLines(string(reject)),
-		FromFile: test.result,
-		ToFile:   test.reject,
+		FromFile: palette.Path(test.result),
+		ToFile:   palette.Path(test.reject),
 		Context:  3,
 	}
 	if text, err := difflib.GetUnifiedDiffString(diff); err == nil {
-		fmt.Printf(text)
+		fmt.Printf(TrimAndColorizeDiff(text))
 	}
 }

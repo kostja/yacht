@@ -5,7 +5,19 @@ done * tabular result output
 done * pattern recognition for the command line 1h,
 done * colored output 4h
 * start and shutdown a single scylla instance 4h
-* --uri option: command line and config file
+  install:
+  * create conf/ directory
+  * put scylla.yaml in it, after processing it from a template
+  * create db directory
+  start:
+  * start binary
+  stop:
+  * kill binary
+  * kill pid file if exists
+  uninstall:
+  * remove conf/, db/
+
+done * --uri option: command line and config file
 * update readme  2h
 
 Milestone 2 "Useful to others":

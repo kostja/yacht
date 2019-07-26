@@ -175,10 +175,25 @@ func (server *cql_server_uri) Start(lane *Lane) error {
 func (server *cql_server_uri) Connect() (Connection, error) {
 	session, err := server.cluster.CreateSession()
 	if err != nil {
-		return nil, merry.Wrap(err)
+		return nil, merry.Prepend(err, "when connecting to '"+server.uri+"'")
 	}
 	//	session.SetConsistency(gocql.Any)
 	return &cql_connection{session: session}, nil
+}
+
+// cql_server - a standalone scylla server
+
+type cql_server struct {
+	cql_server_uri
+}
+
+func (server *cql_server) ModeName() string {
+	return "single"
+}
+
+func (server *cql_server) Start(lane *Lane) error {
+
+	return server.cql_server_uri.Start(lane)
 }
 
 // A suite with CQL tests
@@ -252,12 +267,12 @@ func (suite *cql_test_suite) RunSuite(force bool, lane *Lane, server Server) (in
 			return 0, merry.Wrap(err)
 		}
 		PrintTestBlurb(lane.id, full_name, server.ModeName(), test_rc)
-		if test_rc == "FAIL" {
+		if test_rc == "fail" {
 			test.PrintUniDiff()
 			suite_rc = 1
 			suite.failed = append(suite.failed, full_name)
 			if force == false {
-				break
+				return suite_rc, nil
 			}
 		}
 	}

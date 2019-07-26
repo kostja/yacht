@@ -71,6 +71,9 @@ type Env struct {
 	vardir string
 	// Where to look for server binaries
 	builddir string
+	// --uri option, if provided, or uri: in the configuration file,
+	// or "127.0.0.1"
+	uri string
 }
 
 // Look up a configuration file and load it if found
@@ -89,6 +92,7 @@ func (env *Env) configure() {
 	type Scylla struct {
 		Builddir string
 		Srcdir   string
+		Uri      string
 	}
 	type Configuration struct {
 		Scylla Scylla
@@ -103,6 +107,7 @@ func (env *Env) configure() {
 		Scylla: Scylla{
 			Builddir: path.Join(os.Getenv("HOME"), "scylla/build/dev"),
 			Srcdir:   path.Join(os.Getenv("HOME"), "scylla/tests"),
+			Uri:      "127.0.0.1",
 		},
 	}
 	// Check if a config file is present
@@ -123,6 +128,7 @@ func (env *Env) configure() {
 	env.builddir, _ = filepath.Abs(configuration.Scylla.Builddir)
 	env.srcdir, _ = filepath.Abs(configuration.Scylla.Srcdir)
 	env.vardir, _ = filepath.Abs(configuration.Vardir)
+	env.uri = configuration.Scylla.Uri
 	var check_dir = func(name string, value string) {
 		var msg string = "Incorrect configuration setting for %s: %v\n"
 		st, err := os.Stat(value)
@@ -149,6 +155,8 @@ func (env *Env) Usage() {
 	pflag.BoolVar(&env.force, "force", false,
 		`Go on with other tests in case of an individual test failure.
 Default: false`)
+	pflag.StringVar(&env.uri, "uri", env.uri,
+		"Server URI to connect to in URI mode")
 	pflag.Usage = func() {
 		fmt.Println("yacht - a Yet Another Scylla Harness for Testing")
 		fmt.Printf("\nUsage: %v [--force] [pattern [...]]\n", os.Args[0])
@@ -336,7 +344,9 @@ func (yacht *Yacht) findSuites() {
 			for _, mode_cfg := range cfg.Mode {
 				var server Server
 				if strings.EqualFold(mode_cfg["type"], "uri") == true {
-					server = &cql_server_uri{uri: "127.0.0.1"}
+					server = &cql_server_uri{uri: yacht.env.uri}
+				} else if strings.EqualFold(mode_cfg["type"], "single") == true {
+					server = &cql_server{cql_server_uri: cql_server_uri{uri: yacht.env.uri}}
 				} else {
 					fmt.Printf("Skipping unknown mode '%s' in suite '%s' at %s\n",
 						palette.Crit("%s", mode_cfg["type"]),
@@ -362,23 +372,23 @@ func (yacht *Yacht) RunSuites() ([]string, int) {
 	var rc int = 0
 	var failed []string
 	for _, suite := range yacht.suites {
+		PrintSuiteBeginBlurb()
 		for _, server := range suite.Servers() {
 			// Clear the lane between test suites
 			// Note, it's done before the suite is started,
 			// not after, to preserve important artefacts
 			// between runs
 			yacht.lane.CleanupBeforeNextSuite()
-			PrintSuiteBeginBlurb()
 			suite.PrepareLane(&yacht.lane, server)
 			if suite_rc, err := suite.RunSuite(yacht.env.force, &yacht.lane, server); err != nil {
-				log.Printf("%s%v\n", palette.Crit("yacht failure: "), err)
+				fmt.Printf("%s%v\n", palette.Crit("yacht failure: "), err)
 				return failed, 1
 			} else {
 				rc |= suite_rc
 				failed = append(failed, suite.FailedTests()...)
-				PrintSuiteEndBlurb()
 			}
 		}
+		PrintSuiteEndBlurb()
 	}
 	return failed, rc
 }

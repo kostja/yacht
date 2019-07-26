@@ -14,6 +14,4 @@ description: light weight transactions
 # set up. Differnet options are available depending on the
 # chosen mode type.
 mode:
-    - name: single
-      type: single
-      ncpu: 1
+    - type: uri

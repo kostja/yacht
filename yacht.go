@@ -64,6 +64,7 @@ type Connection interface {
 type Server interface {
 	Start(lane *Lane) error
 	Connect() (Connection, error)
+	ModeName() string
 }
 
 type ColoredSprintf func(format string, a ...interface{}) string
@@ -385,20 +386,27 @@ func (yacht *Yacht) findSuites() {
 					palette.Path("%s", path), palette.Crit("%v", err))
 				continue
 			}
+			// Only append the siute if it is not empty
+			if suite.IsEmpty() == true {
+				continue
+			}
 			if len(cfg.Mode) == 0 {
 				cfg.Mode = append(cfg.Mode, map[string]string{"type": "uri"})
 			}
-			/*
-				for _, mode_cfg = range cfg.Mode {
-					if strings.EqualFold(mode_cfg["type"], "developer") == true {
-
-					}
+			for _, mode_cfg := range cfg.Mode {
+				var server Server
+				if strings.EqualFold(mode_cfg["type"], "uri") == true {
+					server = &cql_server_uri{uri: "127.0.0.1"}
+				} else {
+					fmt.Printf("Skipping unknown mode '%s' in suite '%s' at %s\n",
+						palette.Crit("%s", mode_cfg["type"]),
+						palette.Crit("%s", suite.name),
+						palette.Path("%s", suite_cfg.ConfigFileUsed()))
+					continue
 				}
-			*/
-			// Only append the siute if it is not empty
-			if suite.IsEmpty() == false {
-				server := cql_server_uri{uri: "127.0.0.1"}
-				suite.AddMode(&server)
+				suite.AddMode(server)
+			}
+			if len(suite.Servers()) > 0 {
 				yacht.suites = append(yacht.suites, &suite)
 			}
 		}
@@ -438,8 +446,8 @@ func (yacht *Yacht) RunSuites() ([]string, int) {
 func PrintSuiteBeginBlurb() {
 	fmt.Printf("%s\n", strings.Repeat("=", 80))
 	fmt.Printf("LANE ")
-	fmt.Printf("%-46s", "TEST")
-	fmt.Printf(palette.Warn("%-17s", "OPTIONS"))
+	fmt.Printf("%-52s", "TEST")
+	fmt.Printf(palette.Warn("%-11s", "MODE"))
 	fmt.Printf(palette.Pass("RESULT"))
 	fmt.Printf("\n")
 	fmt.Printf("%s\n", strings.Repeat("-", 75))
@@ -449,7 +457,7 @@ func PrintSuiteEndBlurb() {
 	fmt.Printf("%s\n", strings.Repeat("-", 75))
 }
 
-func PrintTestBlurb(lane string, name string, options string, result string) {
+func PrintTestBlurb(lane string, name string, mode string, result string) {
 	switch result {
 	case "pass":
 		result = palette.Pass("[ %s ]", result)
@@ -460,7 +468,8 @@ func PrintTestBlurb(lane string, name string, options string, result string) {
 	default:
 		result = palette.Skip(result)
 	}
-	fmt.Printf("[%3s] %-45s %-14s %-8s\n", lane, name, options, result)
+	mode = palette.Warn("%.12s", mode)
+	fmt.Printf("[%3s] %-50s %-18s %-8s\n", lane, name, mode, result)
 }
 
 func (yacht *Yacht) Run() int {
@@ -614,6 +623,10 @@ type cql_server_uri struct {
 	cluster *gocql.ClusterConfig
 }
 
+func (server *cql_server_uri) ModeName() string {
+	return "uri"
+}
+
 // Destroy yacht keyspace when done
 type cql_server_uri_artefact struct {
 	session *gocql.Session
@@ -725,7 +738,7 @@ func (suite *cql_test_suite) RunSuite(force bool, lane *Lane, server Server) (in
 		if err != nil {
 			return 0, merry.Wrap(err)
 		}
-		PrintTestBlurb(lane.id, full_name, "", test_rc)
+		PrintTestBlurb(lane.id, full_name, server.ModeName(), test_rc)
 		if test_rc == "FAIL" {
 			test.PrintUniDiff()
 			suite_rc = 1

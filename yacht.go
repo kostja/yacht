@@ -22,7 +22,6 @@ import "github.com/gocql/gocql"
 import "github.com/udhos/equalfile"
 import "github.com/pmezard/go-difflib/difflib"
 import "github.com/olekukonko/tablewriter"
-import "github.com/fatih/color"
 
 // A directory with tests
 type TestSuite interface {
@@ -65,53 +64,6 @@ type Server interface {
 	Start(lane *Lane) error
 	Connect() (Connection, error)
 	ModeName() string
-}
-
-type ColoredSprintf func(format string, a ...interface{}) string
-
-func CreateColor(attributes ...color.Attribute) ColoredSprintf {
-	var c = color.New()
-	for _, attribute := range attributes {
-		c.Add(attribute)
-	}
-	return c.SprintfFunc()
-}
-
-// A color palette for highlighting harness output
-type Palette struct {
-	// Passed test
-	Pass ColoredSprintf
-	// Failed test
-	Fail ColoredSprintf
-	// New tes
-	New ColoredSprintf
-	// Skipped or disabled test
-	Skip ColoredSprintf
-	// Path
-	Path ColoredSprintf
-	// diff +
-	DiffIn ColoredSprintf
-	// diff -
-	DiffOut ColoredSprintf
-	// A warning or important information
-	Warn ColoredSprintf
-	// Critical error
-	Crit ColoredSprintf
-	// Normal output - this solely for documenting purposes,
-	// don't use, use fmt.*print* instead
-	Info ColoredSprintf
-}
-
-var palette = Palette{
-	Pass:    CreateColor(color.FgGreen),
-	Fail:    CreateColor(color.FgRed),
-	New:     CreateColor(color.FgBlue),
-	Skip:    CreateColor(color.Faint),
-	Path:    CreateColor(color.Bold),
-	DiffIn:  CreateColor(color.FgGreen),
-	DiffOut: CreateColor(color.FgRed),
-	Warn:    CreateColor(color.FgYellow),
-	Crit:    CreateColor(color.FgRed),
 }
 
 // Yacht running environment.
@@ -441,35 +393,6 @@ func (yacht *Yacht) RunSuites() ([]string, int) {
 		}
 	}
 	return failed, rc
-}
-
-func PrintSuiteBeginBlurb() {
-	fmt.Printf("%s\n", strings.Repeat("=", 80))
-	fmt.Printf("LANE ")
-	fmt.Printf("%-52s", "TEST")
-	fmt.Printf(palette.Warn("%-11s", "MODE"))
-	fmt.Printf(palette.Pass("RESULT"))
-	fmt.Printf("\n")
-	fmt.Printf("%s\n", strings.Repeat("-", 75))
-}
-
-func PrintSuiteEndBlurb() {
-	fmt.Printf("%s\n", strings.Repeat("-", 75))
-}
-
-func PrintTestBlurb(lane string, name string, mode string, result string) {
-	switch result {
-	case "pass":
-		result = palette.Pass("[ %s ]", result)
-	case "fail":
-		result = palette.Fail("[ %s ]", result)
-	case "new":
-		result = palette.New("[ %s  ]", result)
-	default:
-		result = palette.Skip(result)
-	}
-	mode = palette.Warn("%.12s", mode)
-	fmt.Printf("[%3s] %-50s %-18s %-8s\n", lane, name, mode, result)
 }
 
 func (yacht *Yacht) Run() int {
@@ -840,25 +763,6 @@ func (test *cql_test_file) RunTest(force bool, c Connection, lane *Lane) (string
 	}
 	// Result content mismatch
 	return "fail", nil
-}
-
-var inRE = regexp.MustCompile(`^\+.*$`)
-var outRE = regexp.MustCompile(`^\-.*$`)
-
-func TrimAndColorizeDiff(diff string) string {
-	var lines = strings.Split(diff, "\n")
-	if len(lines) > 60 {
-		lines = lines[:60]
-	}
-	// Skip the first two lines of the diff
-	for i := 2; i < len(lines); i++ {
-		if inRE.MatchString(lines[i]) {
-			lines[i] = palette.DiffIn("%s", lines[i])
-		} else if outRE.MatchString(lines[i]) {
-			lines[i] = palette.DiffOut("%s", lines[i])
-		}
-	}
-	return strings.Join(lines, "\n")
 }
 
 func (test *cql_test_file) PrintUniDiff() {

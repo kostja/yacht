@@ -175,6 +175,10 @@ Positional arguments:
 	}
 	pflag.Parse()
 	env.patterns = pflag.Args()
+	if len(env.patterns) == 0 {
+		// Add a wildcard if there are no user defined patterns
+		env.patterns = append(env.patterns, "")
+	}
 }
 
 // Test lane is a directory on disk containing
@@ -590,16 +594,19 @@ func (suite *cql_test_suite) FindTests(suite_path string, patterns []string) err
 		return merry.Wrap(err)
 	}
 	// @todo: say nothing if there are no tests
-	fmt.Printf("Collecting tests in %-14s (Found %3d tests): %.26s\n",
-		fmt.Sprintf("'%.12s'", suite.name), len(files), suite.description)
+	fmt.Printf("Collecting tests in %-14s ", fmt.Sprintf("'%.12s'", suite.name))
 	for _, file := range files {
-		// @todo: filter by pattern here
-		test := cql_test_file{
-			path: file,
-			name: path.Base(file),
+		for _, pattern := range patterns {
+			if strings.Contains(file, pattern) {
+				test := cql_test_file{
+					path: file,
+					name: path.Base(file),
+				}
+				suite.tests = append(suite.tests, test)
+			}
 		}
-		suite.tests = append(suite.tests, test)
 	}
+	fmt.Printf("(Found %3d tests): %.26s\n", len(suite.tests), suite.description)
 	return nil
 }
 

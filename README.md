@@ -86,3 +86,24 @@ harness will support multiple lanes, for parallel testing.
 A server is the testing subject. It can be a standalone server, created
 outside the harness (`--uri` option) or a temporary instance created by the
 harness automatically.
+
+Patterns
+--------
+
+When yacht starts, it begins by looking for tests in all suites it can find.
+If you want to run a specific test, write the test name as a command line
+argument, for example:
+
+    $ ./yacht lwt # runs only tests which have "lwt" in their name
+
+The pattern matching simply looks for the specified substring in the test
+name or suite name, so if you want to run only a test in a specific suite,
+write:
+
+    $ ./yacht cql/lwt # runs cql/lwt.test.cql  only
+
+Multiple patterns can be provided, and each match counts independently.
+This is useful to run multiple suites, multiple specific tests, or
+a single test multiple times:
+
+    $ ./yacht lwt lwt lwt lwt lwt # runs cql/lwt.test.cql 5 times

@@ -28,15 +28,17 @@ import "github.com/fatih/color"
 type TestSuite interface {
 	FindTests(path string, patterns []string) error
 	IsEmpty() bool
-	PrepareLane(*Lane)
-	RunSuite(force bool) (int, error)
+	AddMode(server Server)
+	Servers() []Server
+	PrepareLane(*Lane, Server)
+	RunSuite(force bool, lane *Lane, server Server) (int, error)
 	FailedTests() []string
 }
 
 // A single test
 type TestFile interface {
-	PrepareLane(lane *Lane)
-	RunTest(force bool, c Connection) (string, error)
+	Init()
+	RunTest(force bool, c Connection, lane *Lane) (string, error)
 }
 
 // An artefact is anything left by a test or suite while
@@ -307,7 +309,7 @@ type Yacht struct {
 	env Env
 	// Execution environemnt, @todo: have many
 	lane Lane
-	// List of suites to run
+	// List of suites to run, in different configurations
 	suites []TestSuite
 }
 
@@ -395,6 +397,8 @@ func (yacht *Yacht) findSuites() {
 			*/
 			// Only append the siute if it is not empty
 			if suite.IsEmpty() == false {
+				server := cql_server_uri{uri: "127.0.0.1"}
+				suite.AddMode(&server)
 				yacht.suites = append(yacht.suites, &suite)
 			}
 		}
@@ -402,6 +406,33 @@ func (yacht *Yacht) findSuites() {
 	if len(yacht.suites) == 0 {
 		fmt.Printf(" ... found no matching suites\n")
 	}
+}
+
+// Run found suites. Return the list of failed test and result
+func (yacht *Yacht) RunSuites() ([]string, int) {
+
+	var rc int = 0
+	var failed []string
+	for _, suite := range yacht.suites {
+		for _, server := range suite.Servers() {
+			// Clear the lane between test suites
+			// Note, it's done before the suite is started,
+			// not after, to preserve important artefacts
+			// between runs
+			yacht.lane.CleanupBeforeNextSuite()
+			PrintSuiteBeginBlurb()
+			suite.PrepareLane(&yacht.lane, server)
+			if suite_rc, err := suite.RunSuite(yacht.env.force, &yacht.lane, server); err != nil {
+				log.Printf("%s%v\n", palette.Crit("yacht failure: "), err)
+				return failed, 1
+			} else {
+				rc |= suite_rc
+				failed = append(failed, suite.FailedTests()...)
+				PrintSuiteEndBlurb()
+			}
+		}
+	}
+	return failed, rc
 }
 
 func PrintSuiteBeginBlurb() {
@@ -435,29 +466,10 @@ func PrintTestBlurb(lane string, name string, options string, result string) {
 func (yacht *Yacht) Run() int {
 
 	yacht.lane.Init("1", yacht.env.vardir)
-	var rc int = 0
 
 	yacht.findSuites()
 
-	var failed []string
-
-	for _, suite := range yacht.suites {
-		// Clear the lane between test suites
-		// Note, it's done before the suite is started,
-		// not after, to preserve important artefacts
-		// between runs
-		yacht.lane.CleanupBeforeNextSuite()
-		PrintSuiteBeginBlurb()
-		suite.PrepareLane(&yacht.lane)
-		if suite_rc, err := suite.RunSuite(yacht.env.force); err != nil {
-			log.Printf("yacht failure: %+v", err)
-			return 1
-		} else {
-			rc |= suite_rc
-			failed = append(failed, suite.FailedTests()...)
-			PrintSuiteEndBlurb()
-		}
-	}
+	failed, rc := yacht.RunSuites()
 	if len(failed) != 0 {
 		if yacht.env.force == true {
 			fmt.Printf("%s %s\n", palette.Warn("Not all tests executed successfully: "),
@@ -648,10 +660,17 @@ type cql_test_suite struct {
 	description string
 	path        string
 	name        string
-	tests       []cql_test_file
+	tests       []*cql_test_file
 	failed      []string
-	lane        *Lane
-	server      Server
+	servers     []Server
+}
+
+func (suite *cql_test_suite) AddMode(server Server) {
+	suite.servers = append(suite.servers, server)
+}
+
+func (suite *cql_test_suite) Servers() []Server {
+	return suite.servers
 }
 
 func (suite *cql_test_suite) FailedTests() []string {
@@ -672,9 +691,9 @@ func (suite *cql_test_suite) FindTests(suite_path string, patterns []string) err
 			if strings.Contains(file, pattern) {
 				test := cql_test_file{
 					path: file,
-					name: path.Base(file),
 				}
-				suite.tests = append(suite.tests, test)
+				test.Init()
+				suite.tests = append(suite.tests, &test)
 			}
 		}
 	}
@@ -686,31 +705,27 @@ func (suite *cql_test_suite) IsEmpty() bool {
 	return len(suite.tests) == 0
 }
 
-func (suite *cql_test_suite) PrepareLane(lane *Lane) {
-	suite.lane = lane
-	suite.server = &cql_server_uri{uri: "127.0.0.1"}
-	suite.server.Start(lane)
-	for i, _ := range suite.tests {
-		suite.tests[i].PrepareLane(lane)
-	}
+func (suite *cql_test_suite) PrepareLane(lane *Lane, server Server) {
+	server.Start(lane)
 }
 
-func (suite *cql_test_suite) RunSuite(force bool) (int, error) {
-	c, err := suite.server.Connect()
-	var suite_rc int = 0
+func (suite *cql_test_suite) RunSuite(force bool, lane *Lane, server Server) (int, error) {
+	c, err := server.Connect()
 	if err != nil {
 		// 'force' affects .result/reject mismatch,
 		// but not harness or infrastructure failures
 		return 0, merry.Wrap(err)
 	}
 	defer c.Close()
+
+	var suite_rc int = 0
 	for _, test := range suite.tests {
 		var full_name = path.Join(suite.name, test.name)
-		test_rc, err := test.RunTest(force, c)
+		test_rc, err := test.RunTest(force, c, lane)
 		if err != nil {
 			return 0, merry.Wrap(err)
 		}
-		PrintTestBlurb(suite.lane.id, full_name, "", test_rc)
+		PrintTestBlurb(lane.id, full_name, "", test_rc)
 		if test_rc == "FAIL" {
 			test.PrintUniDiff()
 			suite_rc = 1
@@ -728,18 +743,10 @@ type cql_test_file struct {
 	name string
 	// Path to test case
 	path string
-	// Where to store temporary state
-	vardir string
-	// Path to a temporary output file in vardir
-	tmp string
 	// Path to result file in srcdir
 	result string
 	// Path to reject file in srcdir
 	reject string
-	// True if the test output is the same as pre-recorded one
-	isEqualResult bool
-	// True if the the pre-recorded output did not exist
-	isNew bool
 }
 
 // matches comments and whitespace
@@ -747,16 +754,18 @@ var commentRE = regexp.MustCompile(`^\s*((--|\/\/).*)?$`)
 var testCQLRE = regexp.MustCompile(`test\.cql$`)
 var resultRE = regexp.MustCompile(`result$`)
 
-func (test *cql_test_file) PrepareLane(lane *Lane) {
-	test.vardir = lane.Dir()
-	test.tmp = path.Join(test.vardir, testCQLRE.ReplaceAllString(test.name, `result`))
+func (test *cql_test_file) Init() {
+	test.name = path.Base(test.path)
 	test.result = testCQLRE.ReplaceAllString(test.path, `result`)
 	test.reject = resultRE.ReplaceAllString(test.result, `reject`)
 }
 
 // Open a file and read it line-by-line, splitting into test cases.
-func (test *cql_test_file) RunTest(force bool, c Connection) (string, error) {
+func (test *cql_test_file) RunTest(force bool, c Connection, lane *Lane) (string, error) {
 
+	tmpfile_name := path.Join(lane.Dir(), testCQLRE.ReplaceAllString(test.name, `result`))
+	var isEqualResult bool
+	var isNew bool
 	// Open input file
 	test_file, err := os.Open(test.path)
 	if err != nil {
@@ -765,10 +774,10 @@ func (test *cql_test_file) RunTest(force bool, c Connection) (string, error) {
 	defer test_file.Close()
 
 	// Open a temporary output file
-	tmp_file, err := os.OpenFile(test.tmp,
+	tmp_file, err := os.OpenFile(tmpfile_name,
 		os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
 	if err != nil {
-		return "", merry.Prepend(err, test.tmp)
+		return "", merry.Prepend(err, tmpfile_name)
 	}
 	defer tmp_file.Close()
 
@@ -794,26 +803,26 @@ func (test *cql_test_file) RunTest(force bool, c Connection) (string, error) {
 
 	if _, err := os.Stat(test.result); err == nil {
 		// Compare output
-		test.isEqualResult, _ = equalfile.New(nil, equalfile.Options{}).CompareFile(
-			test.tmp, test.result)
+		isEqualResult, _ = equalfile.New(nil, equalfile.Options{}).CompareFile(
+			tmpfile_name, test.result)
 	} else if os.IsNotExist(err) {
-		test.isNew = true
+		isNew = true
 	} else {
 		return "", merry.Wrap(err)
 	}
 
-	if test.isEqualResult {
-		os.Remove(test.tmp)
+	if isEqualResult {
+		os.Remove(tmpfile_name)
 		return "pass", nil
 	}
-	if test.isNew {
+	if isNew {
 		// Create a result file when running for the first time
-		if err := os.Rename(test.tmp, test.result); err != nil {
+		if err := os.Rename(tmpfile_name, test.result); err != nil {
 			return "", merry.Wrap(err)
 		}
 		return "new", nil
 	}
-	if err := os.Rename(test.tmp, test.reject); err != nil {
+	if err := os.Rename(tmpfile_name, test.reject); err != nil {
 		return "", merry.Wrap(err)
 	}
 	// Result content mismatch

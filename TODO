@@ -1,0 +1,35 @@
+Milestone 1 "Minimal":
+
+done * print unidiff to the output
+done * tabular result output
+done * pattern recognition for the command line 1h,
+done * colored output 4h
+* start and shutdown a single scylla instance 4h
+* --uri option: command line and config file
+* update readme  2h
+
+Milestone 2 "Useful to others":
+
+* --start-and-exit
+* --suite option
+* test case support within a test file (aka harness commands),
+* disable/enable test cases/file in suite.yaml
+* print server log on failure
+* greplog harness command
+
+Milestone 3 "Sufficient for LWT":
+
+* suite configuration file, server option:
+    * 3-node cluster topology
+    * 6-node 2-dc cluster topology
+* harness: stop node, start node, restart node
+* harness: remove node
+* harness: replace node
+
+Nice to have:
+* delimiter: allow to set a delimiter of CQL commands for multi-line
+  commands
+* output filter: allow to set a filter (regular expression) to
+  transform the output, to clean it from noise
+* randomize lane name with a character or two
+

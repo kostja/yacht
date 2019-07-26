@@ -340,8 +340,8 @@ func (yacht *Yacht) findSuites() {
 	for _, path := range files {
 		st, err := os.Stat(path)
 		if err != nil {
-			// @todo: add warning color
-			log.Printf("Skipping broken suite %s: %v", path, err)
+			log.Printf("Skipping broken suite %s: %s",
+				palette.Path("%s", path), palette.Warn("%v", err))
 			continue
 		}
 		// Skip non-directories, it's OK to have other files in srcdir
@@ -356,33 +356,43 @@ func (yacht *Yacht) findSuites() {
 		type BasicSuiteConfiguration struct {
 			Type        string
 			Description string
+			Mode        []map[string]string
 		}
 		// Skip files which can not be read
 		if err := suite_cfg.ReadInConfig(); err == nil {
 			var cfg BasicSuiteConfiguration
 			if err := suite_cfg.Unmarshal(&cfg); err != nil {
-				// @todo: add warning color
-				log.Printf("Failed to read suite configuration at %s: %v", path, err)
+				log.Printf("Failed to read suite configuration at %s: %s",
+					palette.Path("%s", path), palette.Warn("%v", err))
 				continue
 			}
 			if cfg.Type == "" {
 				// There is no configuration file
 				continue
 			}
-			if cfg.Type != "cql" {
-				// @todo: add warning color
+			if strings.EqualFold(cfg.Type, "cql") != true {
 				log.Printf("Skipping unknown suite type '%s' at %s",
-					cfg.Type, path)
+					palette.Crit("%s", cfg.Type), palette.Path("%s", path))
 				continue
 			}
 			suite := cql_test_suite{
 				description: cfg.Description,
 			}
 			if err := suite.FindTests(path, yacht.env.patterns); err != nil {
-				// @todo add warning color
-				log.Printf("Failed to initialize a suite at %s: %v", path, err)
+				log.Printf("Failed to initialize a suite at %s: %v",
+					palette.Path("%s", path), palette.Crit("%v", err))
 				continue
 			}
+			if len(cfg.Mode) == 0 {
+				cfg.Mode = append(cfg.Mode, map[string]string{"type": "uri"})
+			}
+			/*
+				for _, mode_cfg = range cfg.Mode {
+					if strings.EqualFold(mode_cfg["type"], "developer") == true {
+
+					}
+				}
+			*/
 			// Only append the siute if it is not empty
 			if suite.IsEmpty() == false {
 				yacht.suites = append(yacht.suites, &suite)
@@ -398,7 +408,7 @@ func PrintSuiteBeginBlurb() {
 	fmt.Printf("%s\n", strings.Repeat("=", 80))
 	fmt.Printf("LANE ")
 	fmt.Printf("%-46s", "TEST")
-	fmt.Printf(palette.Warn("%-14s", "OPTIONS"))
+	fmt.Printf(palette.Warn("%-17s", "OPTIONS"))
 	fmt.Printf(palette.Pass("RESULT"))
 	fmt.Printf("\n")
 	fmt.Printf("%s\n", strings.Repeat("-", 75))
@@ -410,16 +420,16 @@ func PrintSuiteEndBlurb() {
 
 func PrintTestBlurb(lane string, name string, options string, result string) {
 	switch result {
-	case "OK":
-		result = palette.Pass(result)
-	case "FAIL":
-		result = palette.Fail(result)
-	case "NEW":
-		result = palette.New(result)
+	case "pass":
+		result = palette.Pass("[ %s ]", result)
+	case "fail":
+		result = palette.Fail("[ %s ]", result)
+	case "new":
+		result = palette.New("[ %s  ]", result)
 	default:
 		result = palette.Skip(result)
 	}
-	fmt.Printf("%4s %-46s %-14s %-8s\n", lane, name, options, result)
+	fmt.Printf("[%3s] %-45s %-14s %-8s\n", lane, name, options, result)
 }
 
 func (yacht *Yacht) Run() int {
@@ -437,7 +447,6 @@ func (yacht *Yacht) Run() int {
 		// not after, to preserve important artefacts
 		// between runs
 		yacht.lane.CleanupBeforeNextSuite()
-		// @todo: multiple lanes to run tests in parallel
 		PrintSuiteBeginBlurb()
 		suite.PrepareLane(&yacht.lane)
 		if suite_rc, err := suite.RunSuite(yacht.env.force); err != nil {
@@ -451,7 +460,8 @@ func (yacht *Yacht) Run() int {
 	}
 	if len(failed) != 0 {
 		if yacht.env.force == true {
-			fmt.Printf(palette.Warn("Not all tests executeed successfully: %v\n", failed))
+			fmt.Printf("%s %s\n", palette.Warn("Not all tests executed successfully: "),
+				palette.Path("%v", failed))
 		} else {
 			fmt.Printf("%s %s\n", palette.Crit("Test failed: "), palette.Path(failed[0]))
 		}
@@ -549,7 +559,6 @@ func (c *cql_connection) Execute(cql string) (string, error) {
 	err := query.Exec()
 
 	if err == nil {
-		// todo: serialize results
 		result.status = "OK"
 
 		iter := query.Iter()
@@ -657,7 +666,6 @@ func (suite *cql_test_suite) FindTests(suite_path string, patterns []string) err
 	if err != nil {
 		return merry.Wrap(err)
 	}
-	// @todo: say nothing if there are no tests
 	fmt.Printf("Collecting tests in %-14s ", fmt.Sprintf("'%.12s'", suite.name))
 	for _, file := range files {
 		for _, pattern := range patterns {
@@ -697,15 +705,16 @@ func (suite *cql_test_suite) RunSuite(force bool) (int, error) {
 	}
 	defer c.Close()
 	for _, test := range suite.tests {
+		var full_name = path.Join(suite.name, test.name)
 		test_rc, err := test.RunTest(force, c)
 		if err != nil {
 			return 0, merry.Wrap(err)
 		}
-		PrintTestBlurb(suite.lane.id, test.name, "", test_rc)
+		PrintTestBlurb(suite.lane.id, full_name, "", test_rc)
 		if test_rc == "FAIL" {
 			test.PrintUniDiff()
 			suite_rc = 1
-			suite.failed = append(suite.failed, path.Join(suite.name, test.name))
+			suite.failed = append(suite.failed, full_name)
 			if force == false {
 				break
 			}
@@ -795,20 +804,20 @@ func (test *cql_test_file) RunTest(force bool, c Connection) (string, error) {
 
 	if test.isEqualResult {
 		os.Remove(test.tmp)
-		return "OK", nil
+		return "pass", nil
 	}
 	if test.isNew {
 		// Create a result file when running for the first time
 		if err := os.Rename(test.tmp, test.result); err != nil {
 			return "", merry.Wrap(err)
 		}
-		return "NEW", nil
+		return "new", nil
 	}
 	if err := os.Rename(test.tmp, test.reject); err != nil {
 		return "", merry.Wrap(err)
 	}
 	// Result content mismatch
-	return "FAIL", nil
+	return "fail", nil
 }
 
 var inRE = regexp.MustCompile(`^\+.*$`)

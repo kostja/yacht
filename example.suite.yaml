@@ -1,0 +1,19 @@
+# test suite type tells the harness what kind of test files
+# to look for in the suite. CQL type standas for .test.cql
+# files, containing CQL statements
+type: cql
+# test descripiton is displayed by the harness when
+# a suite is found
+description: light weight transactions
+# Mode  is an array of execution modes
+# Mode type is one of few pre-defined cluster topologies,
+# e.g. "developer" starts a single scylla instance in developer
+# mode, "single" is a single instance in production mode,
+# "cluster" starts 3 (or more/less) instances in a single
+# data center and "multidc" starts a multi-data-center
+# set up. Differnet options are available depending on the
+# chosen mode type.
+mode:
+    - name: single
+      type: single
+      ncpu: 1

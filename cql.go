@@ -202,7 +202,6 @@ type cql_test_suite struct {
 	path        string
 	name        string
 	tests       []*cql_test_file
-	failed      []string
 	servers     []Server
 }
 
@@ -212,10 +211,6 @@ func (suite *cql_test_suite) AddMode(server Server) {
 
 func (suite *cql_test_suite) Servers() []Server {
 	return suite.servers
-}
-
-func (suite *cql_test_suite) FailedTests() []string {
-	return suite.failed
 }
 
 func (suite *cql_test_suite) FindTests(suite_path string, patterns []string) error {
@@ -270,7 +265,8 @@ func (suite *cql_test_suite) RunSuite(force bool, lane *Lane, server Server) (in
 		if test_rc == "fail" {
 			test.PrintUniDiff()
 			suite_rc = 1
-			suite.failed = append(suite.failed, full_name)
+			// Record the failed test name
+			lane.failed = append(lane.failed, full_name)
 			if force == false {
 				return suite_rc, nil
 			}

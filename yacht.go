@@ -19,7 +19,6 @@ type TestSuite interface {
 	Servers() []Server
 	PrepareLane(*Lane, Server)
 	RunSuite(force bool, lane *Lane, server Server) (int, error)
-	FailedTests() []string
 }
 
 // A single test
@@ -192,6 +191,8 @@ type Lane struct {
 	dir string
 	// Unique lane id, used as a subdirectory within the directory
 	id string
+	// The list of failed tests
+	failed []string
 }
 
 func (lane *Lane) AddExitArtefact(artefact Artefact) {
@@ -205,6 +206,10 @@ func (lane *Lane) AddSuiteArtefact(artefact Artefact) {
 // Used as server working directory
 func (lane *Lane) Dir() string {
 	return lane.dir
+}
+
+func (lane *Lane) FailedTests() []string {
+	return lane.failed
 }
 
 func (lane *Lane) Init(id string, dir string) {
@@ -241,6 +246,7 @@ func (lane *Lane) CleanupBeforeNextSuite() {
 	}
 	// Clear the artefacts array, the artefacts are now gone
 	lane.removeBeforeNextSuite = nil
+	lane.failed = nil
 }
 
 // Remove all artefacts, such as running servers, on an abnormal exit
@@ -385,7 +391,7 @@ func (yacht *Yacht) RunSuites() ([]string, int) {
 				return failed, 1
 			} else {
 				rc |= suite_rc
-				failed = append(failed, suite.FailedTests()...)
+				failed = append(failed, yacht.lane.FailedTests()...)
 				if rc != 0 && yacht.env.force == false {
 					break
 				}

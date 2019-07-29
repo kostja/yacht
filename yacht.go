@@ -385,10 +385,10 @@ func (yacht *Yacht) RunSuites() ([]string, int) {
 				return failed, 1
 			} else {
 				rc |= suite_rc
-				if yacht.env.force == false {
+				failed = append(failed, suite.FailedTests()...)
+				if rc != 0 && yacht.env.force == false {
 					break
 				}
-				failed = append(failed, suite.FailedTests()...)
 			}
 		}
 		PrintSuiteEndBlurb()

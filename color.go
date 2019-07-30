@@ -1,9 +1,12 @@
 package main
 
-import "strings"
-import "regexp"
-import "fmt"
-import "github.com/fatih/color"
+import (
+	"fmt"
+	"regexp"
+	"strings"
+
+	"github.com/fatih/color"
+)
 
 type ColoredSprintf func(format string, a ...interface{}) string
 

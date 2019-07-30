@@ -1,22 +1,25 @@
 package main
 
-import "os"
-import "fmt"
-import "bufio"
-import "time"
+import (
+	"bufio"
+	"fmt"
+	"os"
+	"time"
 
-import "reflect"
-import "bytes"
-import "path"
-import "path/filepath"
-import "strings"
-import "regexp"
-import "io/ioutil"
-import "github.com/ansel1/merry"
-import "github.com/gocql/gocql"
-import "github.com/udhos/equalfile"
-import "github.com/pmezard/go-difflib/difflib"
-import "github.com/olekukonko/tablewriter"
+	"bytes"
+	"io/ioutil"
+	"path"
+	"path/filepath"
+	"reflect"
+	"regexp"
+	"strings"
+
+	"github.com/ansel1/merry"
+	"github.com/gocql/gocql"
+	"github.com/olekukonko/tablewriter"
+	"github.com/pmezard/go-difflib/difflib"
+	"github.com/udhos/equalfile"
+)
 
 type cql_connection struct {
 	session *gocql.Session
@@ -131,25 +134,25 @@ func (c *cql_connection) Close() {
 }
 
 // A pre-installed CQL server to which we connect via a URI
-type cql_server_uri struct {
+type CQLServerURI struct {
 	uri     string
 	cluster *gocql.ClusterConfig
 }
 
-func (server *cql_server_uri) ModeName() string {
+func (server *CQLServerURI) ModeName() string {
 	return "uri"
 }
 
 // Destroy yacht keyspace when done
-type cql_server_uri_artefact struct {
+type CQLServerURI_artefact struct {
 	session *gocql.Session
 }
 
-func (a *cql_server_uri_artefact) Remove() {
+func (a *CQLServerURI_artefact) Remove() {
 	a.session.Query("DROP KEYSPACE IF EXISTS yacht").Exec()
 }
 
-func (server *cql_server_uri) Start(lane *Lane) error {
+func (server *CQLServerURI) Start(lane *Lane) error {
 	server.cluster = gocql.NewCluster(server.uri)
 	server.cluster.Timeout, _ = time.ParseDuration("30s")
 	// Create an administrative session to prepare
@@ -158,7 +161,7 @@ func (server *cql_server_uri) Start(lane *Lane) error {
 	if err != nil {
 		return merry.Wrap(err)
 	}
-	artefact := cql_server_uri_artefact{session: session}
+	artefact := CQLServerURI_artefact{session: session}
 	// Cleanup before running the suit
 	artefact.Remove()
 	// Create a keyspace for testing
@@ -172,7 +175,7 @@ func (server *cql_server_uri) Start(lane *Lane) error {
 	return nil
 }
 
-func (server *cql_server_uri) Connect() (Connection, error) {
+func (server *CQLServerURI) Connect() (Connection, error) {
 	session, err := server.cluster.CreateSession()
 	if err != nil {
 		return nil, merry.Prepend(err, "when connecting to '"+server.uri+"'")
@@ -181,39 +184,24 @@ func (server *cql_server_uri) Connect() (Connection, error) {
 	return &cql_connection{session: session}, nil
 }
 
-// cql_server - a standalone scylla server
-
-type cql_server struct {
-	cql_server_uri
-}
-
-func (server *cql_server) ModeName() string {
-	return "single"
-}
-
-func (server *cql_server) Start(lane *Lane) error {
-
-	return server.cql_server_uri.Start(lane)
-}
-
 // A suite with CQL tests
-type cql_test_suite struct {
+type CQLTestSuite struct {
 	description string
 	path        string
 	name        string
-	tests       []*cql_test_file
+	tests       []*CQLTestFile
 	servers     []Server
 }
 
-func (suite *cql_test_suite) AddMode(server Server) {
+func (suite *CQLTestSuite) AddMode(server Server) {
 	suite.servers = append(suite.servers, server)
 }
 
-func (suite *cql_test_suite) Servers() []Server {
+func (suite *CQLTestSuite) Servers() []Server {
 	return suite.servers
 }
 
-func (suite *cql_test_suite) FindTests(suite_path string, patterns []string) error {
+func (suite *CQLTestSuite) FindTests(suite_path string, patterns []string) error {
 	suite.path = suite_path
 	suite.name = path.Base(suite.path)
 
@@ -225,7 +213,7 @@ func (suite *cql_test_suite) FindTests(suite_path string, patterns []string) err
 	for _, file := range files {
 		for _, pattern := range patterns {
 			if strings.Contains(file, pattern) {
-				test := cql_test_file{
+				test := CQLTestFile{
 					path: file,
 				}
 				test.Init()
@@ -237,15 +225,15 @@ func (suite *cql_test_suite) FindTests(suite_path string, patterns []string) err
 	return nil
 }
 
-func (suite *cql_test_suite) IsEmpty() bool {
+func (suite *CQLTestSuite) IsEmpty() bool {
 	return len(suite.tests) == 0
 }
 
-func (suite *cql_test_suite) PrepareLane(lane *Lane, server Server) {
+func (suite *CQLTestSuite) PrepareLane(lane *Lane, server Server) {
 	server.Start(lane)
 }
 
-func (suite *cql_test_suite) RunSuite(force bool, lane *Lane, server Server) (int, error) {
+func (suite *CQLTestSuite) RunSuite(force bool, lane *Lane, server Server) (int, error) {
 	c, err := server.Connect()
 	if err != nil {
 		// 'force' affects .result/reject mismatch,
@@ -275,7 +263,7 @@ func (suite *cql_test_suite) RunSuite(force bool, lane *Lane, server Server) (in
 	return suite_rc, nil
 }
 
-type cql_test_file struct {
+type CQLTestFile struct {
 	// Temp name
 	name string
 	// Path to test case
@@ -291,14 +279,14 @@ var commentRE = regexp.MustCompile(`^\s*((--|\/\/).*)?$`)
 var testCQLRE = regexp.MustCompile(`test\.cql$`)
 var resultRE = regexp.MustCompile(`result$`)
 
-func (test *cql_test_file) Init() {
+func (test *CQLTestFile) Init() {
 	test.name = path.Base(test.path)
 	test.result = testCQLRE.ReplaceAllString(test.path, `result`)
 	test.reject = resultRE.ReplaceAllString(test.result, `reject`)
 }
 
 // Open a file and read it line-by-line, splitting into test cases.
-func (test *cql_test_file) RunTest(force bool, c Connection, lane *Lane) (string, error) {
+func (test *CQLTestFile) RunTest(force bool, c Connection, lane *Lane) (string, error) {
 
 	tmpfile_name := path.Join(lane.Dir(), testCQLRE.ReplaceAllString(test.name, `result`))
 	var isEqualResult bool
@@ -366,7 +354,7 @@ func (test *cql_test_file) RunTest(force bool, c Connection, lane *Lane) (string
 	return "fail", nil
 }
 
-func (test *cql_test_file) PrintUniDiff() {
+func (test *CQLTestFile) PrintUniDiff() {
 
 	var result, reject []byte
 	var err error

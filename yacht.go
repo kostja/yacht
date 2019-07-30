@@ -1,15 +1,17 @@
 package main
 
-import "log"
-import "os"
-import "os/signal"
-import "fmt"
+import (
+	"fmt"
+	"log"
+	"os"
+	"os/signal"
+	"path"
+	"path/filepath"
+	"strings"
 
-import "path"
-import "path/filepath"
-import "strings"
-import "github.com/spf13/pflag"
-import "github.com/spf13/viper"
+	"github.com/spf13/pflag"
+	"github.com/spf13/viper"
+)
 
 // A directory with tests
 type TestSuite interface {
@@ -208,6 +210,15 @@ func (lane *Lane) Dir() string {
 	return lane.dir
 }
 
+// With multiple servers we need to be careful all of them do
+// not share the same host/port
+func (lane *Lane) LeaseURI() string {
+	return "127.0.0.2"
+}
+
+func (lane *Lane) ReleaseURI(string) {
+}
+
 func (lane *Lane) FailedTests() []string {
 	return lane.failed
 }
@@ -332,7 +343,7 @@ func (yacht *Yacht) findSuites() {
 					palette.Crit("%s", cfg.Type), palette.Path("%s", path))
 				continue
 			}
-			suite := cql_test_suite{
+			suite := CQLTestSuite{
 				description: cfg.Description,
 			}
 			if err := suite.FindTests(path, yacht.env.patterns); err != nil {
@@ -350,9 +361,9 @@ func (yacht *Yacht) findSuites() {
 			for _, mode_cfg := range cfg.Mode {
 				var server Server
 				if strings.EqualFold(mode_cfg["type"], "uri") == true {
-					server = &cql_server_uri{uri: yacht.env.uri}
+					server = &CQLServerURI{uri: yacht.env.uri}
 				} else if strings.EqualFold(mode_cfg["type"], "single") == true {
-					server = &cql_server{cql_server_uri: cql_server_uri{uri: yacht.env.uri}}
+					server = &CQLServer{builddir: yacht.env.builddir}
 				} else {
 					fmt.Printf("Skipping unknown mode '%s' in suite '%s' at %s\n",
 						palette.Crit("%s", mode_cfg["type"]),

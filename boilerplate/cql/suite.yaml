@@ -1,0 +1,4 @@
+type: cql
+description: example CQL suite for yacht
+mode:
+    - type: single

@@ -12,8 +12,62 @@ import (
 	"time"
 
 	"github.com/ansel1/merry"
+	"github.com/gocql/gocql"
 	"github.com/google/uuid"
 )
+
+// A pre-installed CQL server to which we connect via a URI
+type CQLServerURI struct {
+	uri     string
+	cluster *gocql.ClusterConfig
+}
+
+func (server *CQLServerURI) ModeName() string {
+	return "uri"
+}
+
+// Destroy yacht keyspace when done
+type CQLServerURI_artefact struct {
+	session *gocql.Session
+}
+
+func (a *CQLServerURI_artefact) Remove() {
+	a.session.Query("DROP KEYSPACE IF EXISTS yacht").Exec()
+}
+
+func (server *CQLServerURI) Start(lane *Lane) error {
+	server.cluster = gocql.NewCluster(server.uri)
+	server.cluster.Timeout, _ = time.ParseDuration("30s")
+	// Create an administrative session to prepare
+	// administrative server for testing
+	session, err := server.cluster.CreateSession()
+	if err != nil {
+		return merry.Wrap(err)
+	}
+	artefact := CQLServerURI_artefact{session: session}
+	// Cleanup before running the suit
+	artefact.Remove()
+	// Create a keyspace for testing
+	err = session.Query(`CREATE KEYSPACE IF NOT EXISTS yacht WITH REPLICATION =
+{ 'class': 'SimpleStrategy', 'replication_factor' : 1 } AND DURABLE_WRITES=true`).Exec()
+	if err != nil {
+		return merry.Wrap(err)
+	}
+	server.cluster.Keyspace = "yacht"
+	lane.AddSuiteArtefact(&artefact)
+	return nil
+}
+
+func (server *CQLServerURI) Connect() (Connection, error) {
+	session, err := server.cluster.CreateSession()
+	if err != nil {
+		return nil, merry.Prepend(err, "when connecting to '"+server.uri+"'")
+	}
+	//	session.SetConsistency(gocql.Any)
+	return &CQLConnection{session: session}, nil
+}
+
+// A single Scylla server
 
 type CQLServerConfig struct {
 	Dir         string

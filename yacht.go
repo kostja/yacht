@@ -440,6 +440,7 @@ func main() {
 		env: env,
 	}
 	setSignalAction(&yacht)
-	defer yacht.lane.CleanupBeforeExit()
-	os.Exit(yacht.Run())
+	rc := yacht.Run()
+	yacht.lane.CleanupBeforeExit()
+	os.Exit(rc)
 }

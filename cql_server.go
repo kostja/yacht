@@ -160,7 +160,8 @@ type CQLServer_stop_artefact struct {
 
 func (a *CQLServer_stop_artefact) Remove() {
 	a.cmd.Process.Kill()
-	// Send SIGKILL if killing doesn't succeed
+	// 3 seconds is enough for a good database to die gracefully:
+	// send SIGKILL if SIGTERM doesn't reach its target
 	timer := time.AfterFunc(3*time.Second, func() {
 		syscall.Kill(a.cmd.Process.Pid, syscall.SIGKILL)
 	})

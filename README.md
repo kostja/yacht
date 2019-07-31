@@ -11,9 +11,9 @@ To use:
 
 Create a directory with a CQL file. The file must end with .test.cql. 
 This directory is a test suite. Add a suite.yaml configuration file to the
-directory, using this example.
+directory, using [this example](https://github.com/kostja/yacht/blob/master/example.suite.yaml).
 
-Add a configuration file `~/.yacht.yaml`, following this example, 
+Add a configuration file `~/.yacht.yaml`, following [this example](https://github.com/kostja/yacht/blob/master/example.yacht.yaml), 
 and point it at your Scylla binary, the directory with the test suite and a
 directory for temporary test artefacts.
 

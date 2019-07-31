@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"fmt"
 	"os"
 	"os/exec"
@@ -21,28 +20,36 @@ type CQLServerConfig struct {
 	ClusterName string
 }
 
-var OPTIONS = []string{
-	"--developer-mode=true",
-	"--data-file-directories={{.Dir}}",
-	"--commitlog-directory={{.Dir}}",
-	"--hints-directory={{.Dir}}",
-	"--view-hints-directory={{.Dir}}",
-	"--listen-address={{.URI}}",
-	"--rpc-address={{.URI}}",
-	"--api-address={{.URI}}",
-	"--seed-provider-parameters=seeds={{.URI}}",
-	"--smp={{.SMP}}",
-	"--cluster-name={{.ClusterName}}",
-}
+var SCYLLA_CONF_TEMPLATE string = `
+cluster_name: {{.ClusterName}}
+developer_mode: true
+data_file_directories:
+    - {{.Dir}}
+commitlog_directory: {{.Dir}}
+hints_directory: {{.Dir}}
+view_hints_directory: {{.Dir}}
+
+listen_address: {{.URI}}
+rpc_address: {{.URI}}
+api_address: {{.URI}}
+
+seed_provider:
+    - class_name: org.apache.cassandra.locator.SimpleSeedProvider
+      parameters:
+          - seeds: {{.URI}}
+
+core.smp: {{.SMP}}
+`
 
 type CQLServer struct {
 	CQLServerURI
-	builddir    string
-	cfg         CQLServerConfig
-	exe         string
-	logfileName string
-	cmd         *exec.Cmd
-	logfile     *os.File
+	builddir       string
+	cfg            CQLServerConfig
+	exe            string
+	logFileName    string
+	configFileName string
+	cmd            *exec.Cmd
+	logFile        *os.File
 }
 
 func (server *CQLServer) ModeName() string {
@@ -87,7 +94,7 @@ type CQLServer_uninstall_artefact struct {
 func (a *CQLServer_uninstall_artefact) Remove() {
 	a.lane.ReleaseURI(a.server.cfg.URI)
 	os.RemoveAll(a.server.cfg.Dir)
-	os.Remove(a.server.logfileName)
+	os.Remove(a.server.logFileName)
 }
 
 func (server *CQLServer) Install(lane *Lane) error {
@@ -103,7 +110,10 @@ func (server *CQLServer) Install(lane *Lane) error {
 	if server.cfg.ClusterName == "" {
 		server.cfg.ClusterName = uuid.New().String()
 	}
-	server.logfileName = path.Join(lane.Dir(), server.cfg.URI+".log")
+	server.logFileName = path.Join(lane.Dir(), server.cfg.URI+".log")
+	// SCYLLA_CONF env variable is actually SCYLLA_CONF_DIR environment
+	// variable, and the configuration file name is assumed to be scylla.yaml
+	server.configFileName = path.Join(server.cfg.Dir, "scylla.yaml")
 
 	lane.AddSuiteArtefact(&CQLServer_uninstall_artefact{server: server, lane: lane})
 
@@ -114,29 +124,30 @@ func (server *CQLServer) Install(lane *Lane) error {
 	// Redirect command output to a log file, derive log file name
 	// from URI
 	var err error
-	server.logfile, err = os.OpenFile(server.logfileName,
+	server.logFile, err = os.OpenFile(server.logFileName,
 		os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
 	if err != nil {
 		return err
 	}
 
-	options := make([]string, len(OPTIONS))
-	for i, option := range OPTIONS {
-		var b bytes.Buffer
-		statement := template.Must(template.New("OPTIONS").Parse(option))
-		statement.Execute(&b, &server.cfg)
-		options[i] = b.String()
-	}
-	// Do not confuse Scylla binary if we derived these from the shell
-	os.Unsetenv("SCYLLA_HOME")
-	os.Unsetenv("SCYLLA_CONF")
+	// Create a configuration file. Unfortunately, Scylla can't start without
+	// one. Since we have to create a configuration file, let's avoid
+	// command line options.
+	configFile, err := os.OpenFile(server.configFileName,
+		os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
 
-	cmd := exec.Command(server.exe, options...)
+	statement := template.Must(template.New("SCYLLA_CONF").Parse(SCYLLA_CONF_TEMPLATE))
+	statement.Execute(configFile, &server.cfg)
+	configFile.Close()
+
+	// Do not confuse Scylla binary if we derived this from the parent process
+	os.Unsetenv("SCYLLA_HOME")
+
+	cmd := exec.Command(server.exe)
 	cmd.Dir = server.cfg.Dir
-	fmt.Printf("%+v", cmd.Env)
-	cmd.Env = append(cmd.Env, fmt.Sprintf("SCYLLA_HOME=%s", server.cfg.Dir))
-	cmd.Stdout = server.logfile
-	cmd.Stderr = server.logfile
+	cmd.Env = append(cmd.Env, fmt.Sprintf("SCYLLA_CONF=%s", server.cfg.Dir))
+	cmd.Stdout = server.logFile
+	cmd.Stderr = server.logFile
 
 	server.cmd = cmd
 

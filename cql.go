@@ -229,8 +229,8 @@ func (suite *CQLTestSuite) IsEmpty() bool {
 	return len(suite.tests) == 0
 }
 
-func (suite *CQLTestSuite) PrepareLane(lane *Lane, server Server) {
-	server.Start(lane)
+func (suite *CQLTestSuite) PrepareLane(lane *Lane, server Server) error {
+	return server.Start(lane)
 }
 
 func (suite *CQLTestSuite) RunSuite(force bool, lane *Lane, server Server) (int, error) {

@@ -13,13 +13,15 @@ import (
 	"github.com/spf13/viper"
 )
 
+var ylog *log.Logger
+
 // A directory with tests
 type TestSuite interface {
 	FindTests(path string, patterns []string) error
 	IsEmpty() bool
 	AddMode(server Server)
 	Servers() []Server
-	PrepareLane(*Lane, Server)
+	PrepareLane(*Lane, Server) error
 	RunSuite(force bool, lane *Lane, server Server) (int, error)
 }
 
@@ -117,14 +119,16 @@ func (env *Env) configure() {
 			palette.Path(env_cfg.ConfigFileUsed()))
 		// Parse the config file
 		if err := env_cfg.Unmarshal(&configuration); err != nil {
-			log.Fatalf("Parsing configuration failed: %v", err)
+			fmt.Printf("Parsing configuration failed: %v", err)
+			os.Exit(1)
 		}
 	} else if _, ok := err.(viper.ConfigFileNotFoundError); ok {
 		// Configuration file not found
 	} else {
 		// Configuration file is not accessible
-		log.Fatalf("Error reading config file %s:\n%v",
+		fmt.Printf("Error reading config file %s:\n%v",
 			env_cfg.ConfigFileUsed(), err)
+		os.Exit(1)
 	}
 	env.builddir, _ = filepath.Abs(configuration.Scylla.Builddir)
 	env.srcdir, _ = filepath.Abs(configuration.Scylla.Srcdir)
@@ -230,14 +234,17 @@ func (lane *Lane) Init(id string, dir string) {
 	// Create the directory if it doesn't exist or clear
 	// it if it does
 	if _, err := os.Stat(lane.dir); err != nil && !os.IsNotExist(err) {
-		log.Fatalf("Failed to access temporary directory %s", lane.dir)
+		fmt.Printf("Failed to access temporary directory %s", lane.dir)
+		os.Exit(1)
 	} else if err == nil {
 		if err := os.RemoveAll(lane.dir); err != nil {
-			log.Fatalf("Failed to remove temporary directory %s", lane.dir)
+			fmt.Printf("Failed to remove temporary directory %s", lane.dir)
+			os.Exit(1)
 		}
 	}
 	if err := os.MkdirAll(lane.dir, 0750); err != nil {
-		log.Fatalf("Failed to create temporary directory %s", lane.dir)
+		fmt.Printf("Failed to create temporary directory %s", lane.dir)
+		os.Exit(1)
 	}
 }
 
@@ -287,7 +294,8 @@ func setSignalAction(yacht *Yacht) {
 	go func() {
 		for sig := range c {
 			yacht.lane.CleanupBeforeExit()
-			log.Fatalf("Got signal %v, exiting", sig)
+			fmt.Printf("Got signal %v, exiting", sig)
+			os.Exit(1)
 		}
 	}()
 }
@@ -303,12 +311,13 @@ func (yacht *Yacht) findSuites() {
 	fmt.Printf("Looking for suites at %s\n", palette.Path(yacht.env.srcdir))
 	files, err := filepath.Glob(path.Join(yacht.env.srcdir, "*"))
 	if err != nil {
-		log.Fatalf("Failed to find suites in %s: %v", yacht.env.srcdir, err)
+		fmt.Printf("Failed to find suites in %s: %v", yacht.env.srcdir, err)
+		os.Exit(1)
 	}
 	for _, path := range files {
 		st, err := os.Stat(path)
 		if err != nil {
-			log.Printf("Skipping broken suite %s: %s",
+			fmt.Printf("Skipping broken suite %s: %s",
 				palette.Path("%s", path), palette.Warn("%v", err))
 			continue
 		}
@@ -330,7 +339,7 @@ func (yacht *Yacht) findSuites() {
 		if err := suite_cfg.ReadInConfig(); err == nil {
 			var cfg BasicSuiteConfiguration
 			if err := suite_cfg.Unmarshal(&cfg); err != nil {
-				log.Printf("Failed to read suite configuration at %s: %s",
+				fmt.Printf("Failed to read suite configuration at %s: %s",
 					palette.Path("%s", path), palette.Warn("%v", err))
 				continue
 			}
@@ -339,7 +348,7 @@ func (yacht *Yacht) findSuites() {
 				continue
 			}
 			if strings.EqualFold(cfg.Type, "cql") != true {
-				log.Printf("Skipping unknown suite type '%s' at %s",
+				fmt.Printf("Skipping unknown suite type '%s' at %s",
 					palette.Crit("%s", cfg.Type), palette.Path("%s", path))
 				continue
 			}
@@ -347,7 +356,7 @@ func (yacht *Yacht) findSuites() {
 				description: cfg.Description,
 			}
 			if err := suite.FindTests(path, yacht.env.patterns); err != nil {
-				log.Printf("Failed to initialize a suite at %s: %v",
+				fmt.Printf("Failed to initialize a suite at %s: %v",
 					palette.Path("%s", path), palette.Crit("%v", err))
 				continue
 			}
@@ -396,7 +405,10 @@ func (yacht *Yacht) RunSuites() ([]string, int) {
 			// not after, to preserve important artefacts
 			// between runs
 			yacht.lane.CleanupBeforeNextSuite()
-			suite.PrepareLane(&yacht.lane, server)
+			if err := suite.PrepareLane(&yacht.lane, server); err != nil {
+				fmt.Printf("%s%v\n", palette.Crit("lane failure: "), err)
+				return failed, 1
+			}
 			if suite_rc, err := suite.RunSuite(yacht.env.force, &yacht.lane, server); err != nil {
 				fmt.Printf("%s%v\n", palette.Crit("yacht failure: "), err)
 				return failed, 1
@@ -431,11 +443,25 @@ func (yacht *Yacht) Run() int {
 	return rc
 }
 
+func OpenLog(dir string) {
+	var name = path.Join(dir, "yacht.log")
+	logFile, err := os.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
+	if err != nil {
+		fmt.Printf("%s %s\n", palette.Crit("Failed to open log file"),
+			palette.Path(name))
+		os.Exit(1)
+	}
+	ylog = log.New(logFile, "", log.Ldate|log.Lmicroseconds|log.Lshortfile)
+}
+
 func main() {
 	fmt.Println("Started", strings.Join(os.Args[:], " "))
 
 	var env Env
 	env.Usage()
+
+	OpenLog(env.vardir)
+
 	yacht := Yacht{
 		env: env,
 	}

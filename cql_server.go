@@ -1,10 +1,12 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
 	"os"
 	"os/exec"
 	"path"
+	"regexp"
 	"syscall"
 	"text/template"
 	"time"
@@ -123,10 +125,16 @@ func (server *CQLServer) Install(lane *Lane) error {
 
 	// Redirect command output to a log file, derive log file name
 	// from URI
+	var logFile *os.File
 	var err error
-	server.logFile, err = os.OpenFile(server.logFileName,
-		os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
-	if err != nil {
+	if logFile, err = os.OpenFile(server.logFileName,
+		os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644); err != nil {
+
+		return err
+	}
+	// Open another file descriptor to ensure its position is not advanced
+	// by writes
+	if server.logFile, err = os.Open(server.logFileName); err != nil {
 		return err
 	}
 
@@ -146,8 +154,8 @@ func (server *CQLServer) Install(lane *Lane) error {
 	cmd := exec.Command(server.exe, fmt.Sprintf("--smp=%d", server.cfg.SMP))
 	cmd.Dir = server.cfg.Dir
 	cmd.Env = append(cmd.Env, fmt.Sprintf("SCYLLA_CONF=%s", server.cfg.Dir))
-	cmd.Stdout = server.logFile
-	cmd.Stderr = server.logFile
+	cmd.Stdout = logFile
+	cmd.Stderr = logFile
 
 	server.cmd = cmd
 
@@ -159,6 +167,7 @@ type CQLServer_stop_artefact struct {
 }
 
 func (a *CQLServer_stop_artefact) Remove() {
+	ylog.Printf("Stopping server %d", a.cmd.Process.Pid)
 	a.cmd.Process.Kill()
 	// 3 seconds is enough for a good database to die gracefully:
 	// send SIGKILL if SIGTERM doesn't reach its target
@@ -167,6 +176,18 @@ func (a *CQLServer_stop_artefact) Remove() {
 	})
 	timer.Stop()
 	a.cmd.Process.Wait()
+	ylog.Printf("Stopped server %d", a.cmd.Process.Pid)
+}
+
+func FindLogFilePattern(file *os.File, pattern string) bool {
+	var patternRE = regexp.MustCompile(pattern)
+	var scanner = bufio.NewScanner(file)
+	for scanner.Scan() {
+		if patternRE.Match(scanner.Bytes()) {
+			return true
+		}
+	}
+	return false
 }
 
 func (server *CQLServer) DoStart(lane *Lane) error {
@@ -174,6 +195,15 @@ func (server *CQLServer) DoStart(lane *Lane) error {
 	if err := server.cmd.Start(); err != nil {
 		return err
 	}
-	time.Sleep(0 * time.Second)
+	start := time.Now()
+	for _ = range time.Tick(time.Millisecond * 10) {
+		if FindLogFilePattern(server.logFile, "Scylla.*initialization completed") {
+			break
+		}
+		if time.Now().Sub(start) > 10*time.Second {
+			return merry.Errorf("failed to start server %s on lane %s",
+				server.cfg.URI, lane.id)
+		}
+	}
 	return nil
 }

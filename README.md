@@ -17,8 +17,9 @@ Add a configuration file `~/.yacht.yaml`, following [this example](https://githu
 and point it at your Scylla binary, the directory with the test suite and a
 directory for temporary test artefacts.
 
-Alternatively, use `boilerplate` directory in this repository, and only set
-scylla.builddir in scylla.yaml to point to path with your Scylla binary.
+Alternatively, use [boilerplate](https://github.com/kostja/yacht/blob/master/boilerplate) 
+directory in this repository, and only modify scylla.builddir in scylla.yaml to 
+point to a path with Scylla binary.
 
 Run the suite, e.g. with `boilerplate`:
 

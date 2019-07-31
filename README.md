@@ -9,22 +9,32 @@ To build:
 
 To use:
 
-Add a configuration file `~/.yacht.yaml`, an example configuration file
-is provided in the project directory.
+Create a directory with a CQL file. The file must end with .test.cql. 
+This directory is a test suite. Add a suite.yaml configuration file to the
+directory, using this example.
+
+Add a configuration file `~/.yacht.yaml`, following this example, 
+and point it at your Scylla binary, the directory with the test suite and a
+directory for temporary test artefacts.
+
+Run the suite:
 
     $ ./yacht
 
-will create a temporary directory, initialize a Scylla server instance in it
-and run tests found in the source directory against this server. It will
-print output as the testing progress.
-
+This will create a temporary directory, initialize a Scylla server instance
+in it and run tests found in the source directory against this server. It
+will print output as the testing progresses.
 
 What this program does
 ----------------------
 
-On start, it connects to an existing Cassandra instance,
-creates 'yacht' keyspace, and on shutdown deletes the keyspace.
-
+On start, it looks for test suites and test files, locates a Scylla binary,
+installs it in the test directory, and runs tests against it.
+The CQL queries are executed against 'yacht' keyspace, which is created
+and destroyed automatically.
+It can also be used to connect to an existing Scylla instance and run tests
+against it, set suite type to 'uri' for that and provide 'uri' option
+on the command line or in the config file.
 
 ## Definitions
 
@@ -32,9 +42,12 @@ creates 'yacht' keyspace, and on shutdown deletes the keyspace.
 
 A collection of tests in a single directory. The directory must provide a
 suite configuration file (suite.json or suite.yaml). A suite file
-contains suite description and type. The only supported type is "cql", which
-means that each .test.cql file in the suite is read linewise and sent to a
-Scylla server.
+contains suite description, type and running modes.
+The only supported type is "cql", which means that each .test.cql file in
+the suite is read linewise and sent to a Scylla server. Supported
+running modes are 'single', i.e. run against a single server instance
+which is installed automatically, and 'uri', which uses an existing
+instance.
 
 ### Test
 
@@ -58,15 +71,12 @@ case is found or end-of-file marker is read. Using test cases within a large
 file allows to quickly navigate to a failed test, enable or disable
 individual test cases.
 
-Each test consists of files `*.test(.lua|.sql|.py)?`, `*.result`, and may have
-skip condition file `*.skipcond`.  On first run (without `.result`) `.result`
-is generated from output.  Each run, in the beggining, `.skipcond` file is
-executed. In the local env there's object `self`, that's `Test` object. If test
-must be skipped - you must put `self.skip = 1` in this file. Next,
-`.test(.lua|.py)?` is executed and file `.reject` is created, then `.reject` is
-compared with `.result`. If something differs, then 15 last string of this diff
-file are printed and `.reject` file is saving in the folder, where `.result`
-file is. If not, then `.reject` is deleted.
+Each test consists of files `*.test.cql`, `*.result`.
+On first run (without `.result`) `.result` is generated from server output.
+After `.test.cql` is executed and `.reject` file is created, `.reject` is
+compared with `.result`. If the two files differ, 30 lines of the diff
+are printed and .reject is left in the suite directory. Otherwise,
+`.reject` file is deleted.
 
 ### Lane
 

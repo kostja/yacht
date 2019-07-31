@@ -24,10 +24,10 @@ var SCYLLA_CONF_TEMPLATE string = `
 cluster_name: {{.ClusterName}}
 developer_mode: true
 data_file_directories:
-    - {{.Dir}}
-commitlog_directory: {{.Dir}}
-hints_directory: {{.Dir}}
-view_hints_directory: {{.Dir}}
+    - {{.Dir}}/data
+commitlog_directory: {{.Dir}}/commitlog
+hints_directory: {{.Dir}}/hints
+view_hints_directory: {{.Dir}}/view_hints
 
 listen_address: {{.URI}}
 rpc_address: {{.URI}}
@@ -38,7 +38,7 @@ seed_provider:
       parameters:
           - seeds: {{.URI}}
 
-core.smp: {{.SMP}}
+skip_wait_for_gossip_to_settle: 0
 `
 
 type CQLServer struct {
@@ -143,7 +143,7 @@ func (server *CQLServer) Install(lane *Lane) error {
 	// Do not confuse Scylla binary if we derived this from the parent process
 	os.Unsetenv("SCYLLA_HOME")
 
-	cmd := exec.Command(server.exe)
+	cmd := exec.Command(server.exe, fmt.Sprintf("--smp=%d", server.cfg.SMP))
 	cmd.Dir = server.cfg.Dir
 	cmd.Env = append(cmd.Env, fmt.Sprintf("SCYLLA_CONF=%s", server.cfg.Dir))
 	cmd.Stdout = server.logFile

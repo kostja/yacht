@@ -17,9 +17,12 @@ Add a configuration file `~/.yacht.yaml`, following [this example](https://githu
 and point it at your Scylla binary, the directory with the test suite and a
 directory for temporary test artefacts.
 
-Run the suite:
+Alternatively, use `boilerplate` directory in this repository, and only set
+scylla.builddir in scylla.yaml to point to path with your Scylla binary.
 
-    $ ./yacht
+Run the suite, e.g. with `boilerplate`:
+
+    $ cd boilerplate; ../yacht
 
 This will create a temporary directory, initialize a Scylla server instance
 in it and run tests found in the source directory against this server. It

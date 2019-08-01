@@ -71,10 +71,11 @@ func (server *CQLServerURI) Connect() (Connection, error) {
 // A single Scylla server
 
 type CQLServerConfig struct {
-	Dir         string
-	URI         string
-	SMP         int
-	ClusterName string
+	Dir                       string
+	URI                       string
+	SMP                       int
+	ClusterName               string
+	SkipWaitForGossipToSettle int
 }
 
 var SCYLLA_CONF_TEMPLATE string = `
@@ -96,7 +97,7 @@ seed_provider:
       parameters:
           - seeds: {{.URI}}
 
-skip_wait_for_gossip_to_settle: 0
+skip_wait_for_gossip_to_settle: {{.SkipWaitForGossipToSettle}}
 `
 
 type CQLServer struct {
@@ -256,6 +257,7 @@ func FindLogFilePattern(file *os.File, pattern string) bool {
 }
 
 func (server *CQLServer) DoStart(lane *Lane) error {
+	const START_TIMEOUT = 30 * time.Second
 	lane.AddExitArtefact(&CQLServer_stop_artefact{cmd: server.cmd})
 	if err := server.cmd.Start(); err != nil {
 		return err
@@ -265,7 +267,7 @@ func (server *CQLServer) DoStart(lane *Lane) error {
 		if FindLogFilePattern(server.logFile, "Scylla.*initialization completed") {
 			break
 		}
-		if time.Now().Sub(start) > 10*time.Second {
+		if time.Now().Sub(start) > START_TIMEOUT {
 			return merry.Errorf("failed to start server %s on lane %s, check server log at %s",
 				server.cfg.URI, lane.id, palette.Path(server.logFileName))
 		}
@@ -304,6 +306,8 @@ func (cluster *CQLCluster) Start(lane *Lane) error {
 		server := CQLServer{builddir: cluster.builddir}
 		// Set a shared cluster name
 		server.cfg.ClusterName = cluster.clusterName
+		// We need gossip for clustered start
+		server.cfg.SkipWaitForGossipToSettle = -1
 
 		go startOne(&server)
 		cluster.servers[i] = &server

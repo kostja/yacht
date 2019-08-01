@@ -149,22 +149,27 @@ func (server *CQLServer) FindScyllaExecutable() error {
 	return nil
 }
 
+type ReleaseURI_artefact struct {
+	uri  string
+	lane *Lane
+}
+
+func (a *ReleaseURI_artefact) Remove() {
+	if a.uri != "" {
+		a.lane.ReleaseURI(a.uri)
+	}
+}
+
 type CQLServer_uninstall_artefact struct {
 	server *CQLServer
-	lane   *Lane
 }
 
 func (a *CQLServer_uninstall_artefact) Remove() {
-	if a.server.cfg.URI != "" {
-		a.lane.ReleaseURI(a.server.cfg.URI)
-	}
 	os.RemoveAll(a.server.cfg.Dir)
 	os.Remove(a.server.logFileName)
 }
 
 func (server *CQLServer) Install(lane *Lane) error {
-
-	lane.AddSuiteArtefact(&CQLServer_uninstall_artefact{server: server, lane: lane})
 
 	// Scylla assumes all instances of a cluster use the same port,
 	// so each instance needs an own IP address.
@@ -172,6 +177,8 @@ func (server *CQLServer) Install(lane *Lane) error {
 	if server.cfg.URI, err = lane.LeaseURI(); err != nil {
 		return err
 	}
+	lane.AddSuiteArtefact(&ReleaseURI_artefact{uri: server.cfg.URI, lane: lane})
+
 	// Instance subdirectory is a directory inside the lane,
 	// so that each lane can run a cluster of instances
 	// Derive subdirectory name from URI
@@ -185,6 +192,8 @@ func (server *CQLServer) Install(lane *Lane) error {
 	// SCYLLA_CONF env variable is actually SCYLLA_CONF_DIR environment
 	// variable, and the configuration file name is assumed to be scylla.yaml
 	server.configFileName = path.Join(server.cfg.Dir, "scylla.yaml")
+
+	lane.AddSuiteArtefact(&CQLServer_uninstall_artefact{server: server})
 
 	if err := os.MkdirAll(server.cfg.Dir, 0750); err != nil {
 		return err

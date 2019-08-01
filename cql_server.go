@@ -73,6 +73,7 @@ func (server *CQLServerURI) Connect() (Connection, error) {
 type CQLServerConfig struct {
 	Dir                       string
 	URI                       string
+	Seed                      string
 	SMP                       int
 	ClusterName               string
 	SkipWaitForGossipToSettle int
@@ -95,7 +96,7 @@ prometheus_address: {{.URI}}
 seed_provider:
     - class_name: org.apache.cassandra.locator.SimpleSeedProvider
       parameters:
-          - seeds: {{.URI}}
+          - seeds: {{.Seed}}
 
 skip_wait_for_gossip_to_settle: {{.SkipWaitForGossipToSettle}}
 `
@@ -171,13 +172,17 @@ func (a *CQLServer_uninstall_artefact) Remove() {
 
 func (server *CQLServer) Install(lane *Lane) error {
 
-	// Scylla assumes all instances of a cluster use the same port,
-	// so each instance needs an own IP address.
 	var err error
-	if server.cfg.URI, err = lane.LeaseURI(); err != nil {
-		return err
+	// Scylla assumes all instances of a cluster use the same port,
+	// so each instance needs an own IP address. The IP address
+	// can be set by the cluster. Otherwise set it here.
+	if server.cfg.URI == "" {
+		if server.cfg.URI, err = lane.LeaseURI(); err != nil {
+			return err
+		}
+		lane.AddSuiteArtefact(&ReleaseURI_artefact{uri: server.cfg.URI, lane: lane})
+		server.cfg.Seed = server.cfg.URI
 	}
-	lane.AddSuiteArtefact(&ReleaseURI_artefact{uri: server.cfg.URI, lane: lane})
 
 	// Instance subdirectory is a directory inside the lane,
 	// so that each lane can run a cluster of instances

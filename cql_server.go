@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path"
 	"regexp"
+	"sync"
 	"syscall"
 	"text/template"
 	"time"
@@ -123,9 +124,13 @@ func (server *CQLServer) Start(lane *Lane) error {
 		return err
 	}
 
+	ylog.Printf("Starting server %s...", server.cfg.URI)
+
 	if err := server.DoStart(lane); err != nil {
 		return err
 	}
+
+	ylog.Printf("Started server %s", server.cfg.URI)
 
 	server.CQLServerURI = CQLServerURI{uri: server.cfg.URI}
 
@@ -281,18 +286,35 @@ func (cluster *CQLCluster) ModeName() string {
 
 func (cluster *CQLCluster) Start(lane *Lane) error {
 
+	var wg sync.WaitGroup
+
+	wg.Add(len(cluster.servers))
+
+	status := make(chan error, len(cluster.servers))
+
+	startOne := func(server *CQLServer) {
+		defer wg.Done()
+		if err := server.Start(lane); err != nil {
+			status <- err
+		}
+	}
+
 	cluster.clusterName = uuid.New().String()
 	for i, _ := range cluster.servers {
 		server := CQLServer{builddir: cluster.builddir}
 		// Set a shared cluster name
 		server.cfg.ClusterName = cluster.clusterName
 
+		go startOne(&server)
 		cluster.servers[i] = &server
-		if err := server.Start(lane); err != nil {
-			return err
-		}
 	}
-	return nil
+	wg.Wait()
+	select {
+	case err := <-status:
+		return err
+	default:
+		return nil
+	}
 }
 
 func (cluster *CQLCluster) Connect() (Connection, error) {

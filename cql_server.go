@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path"
 	"regexp"
+	"strings"
 	"sync"
 	"syscall"
 	"text/template"
@@ -181,6 +182,9 @@ func (server *CQLServer) Install(lane *Lane) error {
 			return err
 		}
 		lane.AddSuiteArtefact(&ReleaseURI_artefact{uri: server.cfg.URI, lane: lane})
+	}
+	// Set the seed if it has not been pre-set.
+	if server.cfg.Seed == "" {
 		server.cfg.Seed = server.cfg.URI
 	}
 
@@ -271,7 +275,7 @@ func FindLogFilePattern(file *os.File, pattern string) bool {
 }
 
 func (server *CQLServer) DoStart(lane *Lane) error {
-	const START_TIMEOUT = 30 * time.Second
+	const START_TIMEOUT = 100 * time.Second
 	lane.AddExitArtefact(&CQLServer_stop_artefact{cmd: server.cmd})
 	if err := server.cmd.Start(); err != nil {
 		return err
@@ -302,6 +306,16 @@ func (cluster *CQLCluster) ModeName() string {
 
 func (cluster *CQLCluster) Start(lane *Lane) error {
 
+	var seeds = make([]string, len(cluster.servers))
+	var err error
+	for i, _ := range seeds {
+		if seeds[i], err = lane.LeaseURI(); err != nil {
+			return err
+		}
+		lane.AddSuiteArtefact(&ReleaseURI_artefact{uri: seeds[i], lane: lane})
+	}
+	var seedsStr = strings.Join(seeds, ", ")
+
 	var wg sync.WaitGroup
 
 	wg.Add(len(cluster.servers))
@@ -320,8 +334,10 @@ func (cluster *CQLCluster) Start(lane *Lane) error {
 		server := CQLServer{builddir: cluster.builddir}
 		// Set a shared cluster name
 		server.cfg.ClusterName = cluster.clusterName
+		server.cfg.URI = seeds[i]
+		server.cfg.Seed = seedsStr
 		// We need gossip for clustered start
-		server.cfg.SkipWaitForGossipToSettle = -1
+		server.cfg.SkipWaitForGossipToSettle = 5
 
 		go startOne(&server)
 		cluster.servers[i] = &server

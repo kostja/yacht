@@ -31,4 +31,6 @@ Nice to have:
 * output filter: allow to set a filter (regular expression) to
   transform the output, to clean it from noise
 * randomize lane name with a character or two
+* backtrace of an instance if an instance crashes
+* instance crash detector
 

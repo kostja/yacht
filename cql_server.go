@@ -88,6 +88,7 @@ view_hints_directory: {{.Dir}}/view_hints
 listen_address: {{.URI}}
 rpc_address: {{.URI}}
 api_address: {{.URI}}
+prometheus_address: {{.URI}}
 
 seed_provider:
     - class_name: org.apache.cassandra.locator.SimpleSeedProvider
@@ -148,21 +149,29 @@ type CQLServer_uninstall_artefact struct {
 }
 
 func (a *CQLServer_uninstall_artefact) Remove() {
-	a.lane.ReleaseURI(a.server.cfg.URI)
+	if a.server.cfg.URI != "" {
+		a.lane.ReleaseURI(a.server.cfg.URI)
+	}
 	os.RemoveAll(a.server.cfg.Dir)
 	os.Remove(a.server.logFileName)
 }
 
 func (server *CQLServer) Install(lane *Lane) error {
 
+	lane.AddSuiteArtefact(&CQLServer_uninstall_artefact{server: server, lane: lane})
+
 	// Scylla assumes all instances of a cluster use the same port,
 	// so each instance needs an own IP address.
-	server.cfg.URI = lane.LeaseURI()
+	var err error
+	if server.cfg.URI, err = lane.LeaseURI(); err != nil {
+		return err
+	}
 	// Instance subdirectory is a directory inside the lane,
 	// so that each lane can run a cluster of instances
 	// Derive subdirectory name from URI
 	server.cfg.Dir = path.Join(lane.Dir(), server.cfg.URI)
 	server.cfg.SMP = 1
+	// Only reset ClusterName if it was not provided
 	if server.cfg.ClusterName == "" {
 		server.cfg.ClusterName = uuid.New().String()
 	}
@@ -171,8 +180,6 @@ func (server *CQLServer) Install(lane *Lane) error {
 	// variable, and the configuration file name is assumed to be scylla.yaml
 	server.configFileName = path.Join(server.cfg.Dir, "scylla.yaml")
 
-	lane.AddSuiteArtefact(&CQLServer_uninstall_artefact{server: server, lane: lane})
-
 	if err := os.MkdirAll(server.cfg.Dir, 0750); err != nil {
 		return err
 	}
@@ -180,7 +187,6 @@ func (server *CQLServer) Install(lane *Lane) error {
 	// Redirect command output to a log file, derive log file name
 	// from URI
 	var logFile *os.File
-	var err error
 	if logFile, err = os.OpenFile(server.logFileName,
 		os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644); err != nil {
 
@@ -255,9 +261,40 @@ func (server *CQLServer) DoStart(lane *Lane) error {
 			break
 		}
 		if time.Now().Sub(start) > 10*time.Second {
-			return merry.Errorf("failed to start server %s on lane %s",
-				server.cfg.URI, lane.id)
+			return merry.Errorf("failed to start server %s on lane %s, check server log at %s",
+				server.cfg.URI, lane.id, palette.Path(server.logFileName))
 		}
 	}
 	return nil
+}
+
+// CQLCluster testing mode
+type CQLCluster struct {
+	servers     [3]*CQLServer
+	builddir    string
+	clusterName string
+}
+
+func (cluster *CQLCluster) ModeName() string {
+	return "cluster"
+}
+
+func (cluster *CQLCluster) Start(lane *Lane) error {
+
+	cluster.clusterName = uuid.New().String()
+	for i, _ := range cluster.servers {
+		server := CQLServer{builddir: cluster.builddir}
+		// Set a shared cluster name
+		server.cfg.ClusterName = cluster.clusterName
+
+		cluster.servers[i] = &server
+		if err := server.Start(lane); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (cluster *CQLCluster) Connect() (Connection, error) {
+	return cluster.servers[0].Connect()
 }

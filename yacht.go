@@ -3,12 +3,14 @@ package main
 import (
 	"fmt"
 	"log"
+	"math/rand"
 	"os"
 	"os/signal"
 	"path"
 	"path/filepath"
 	"strings"
 
+	"github.com/ansel1/merry"
 	"github.com/spf13/pflag"
 	"github.com/spf13/viper"
 )
@@ -199,7 +201,8 @@ type Lane struct {
 	// Unique lane id, used as a subdirectory within the directory
 	id string
 	// The list of failed tests
-	failed []string
+	failed     []string
+	leasedURIs map[string]bool
 }
 
 func (lane *Lane) AddExitArtefact(artefact Artefact) {
@@ -217,11 +220,32 @@ func (lane *Lane) Dir() string {
 
 // With multiple servers we need to be careful all of them do
 // not share the same host/port
-func (lane *Lane) LeaseURI() string {
-	return "127.0.0.2"
+func (lane *Lane) LeaseURI() (string, error) {
+
+	const POOL_SIZE = 30
+
+	if lane.leasedURIs == nil {
+		lane.leasedURIs = make(map[string]bool)
+	}
+
+	if len(lane.leasedURIs) >= POOL_SIZE*3/4 {
+		return "", merry.Errorf("IP address pool has exhaused, current size is %d",
+			len(lane.leasedURIs))
+	}
+
+	for {
+		var uri = fmt.Sprintf("127.0.0.%d", rand.Intn(POOL_SIZE)+2)
+		if _, found := lane.leasedURIs[uri]; found == false {
+			lane.leasedURIs[uri] = true
+			ylog.Printf("Leased uri %s at lane %s", uri, lane.id)
+			return uri, nil
+		}
+	}
 }
 
-func (lane *Lane) ReleaseURI(string) {
+func (lane *Lane) ReleaseURI(uri string) {
+	ylog.Printf("Released uri %s at lane %s", uri, lane.id)
+	delete(lane.leasedURIs, uri)
 }
 
 func (lane *Lane) FailedTests() []string {
@@ -235,16 +259,19 @@ func (lane *Lane) Init(id string, dir string) {
 	// Create the directory if it doesn't exist or clear
 	// it if it does
 	if _, err := os.Stat(lane.dir); err != nil && !os.IsNotExist(err) {
-		fmt.Printf("Failed to access temporary directory %s", lane.dir)
+		fmt.Printf("Failed to access temporary directory %s",
+			palette.Path(lane.dir))
 		os.Exit(1)
 	} else if err == nil {
 		if err := os.RemoveAll(lane.dir); err != nil {
-			fmt.Printf("Failed to remove temporary directory %s", lane.dir)
+			fmt.Printf("Failed to remove temporary directory %s",
+				palette.Path(lane.dir))
 			os.Exit(1)
 		}
 	}
 	if err := os.MkdirAll(lane.dir, 0750); err != nil {
-		fmt.Printf("Failed to create temporary directory %s", lane.dir)
+		fmt.Printf("Failed to create temporary directory %s",
+			palette.Path(lane.dir))
 		os.Exit(1)
 	}
 }
@@ -374,6 +401,8 @@ func (yacht *Yacht) findSuites() {
 					server = &CQLServerURI{uri: yacht.env.uri}
 				} else if strings.EqualFold(mode_cfg["type"], "single") == true {
 					server = &CQLServer{builddir: yacht.env.builddir}
+				} else if strings.EqualFold(mode_cfg["type"], "cluster") == true {
+					server = &CQLCluster{builddir: yacht.env.builddir}
 				} else {
 					fmt.Printf("Skipping unknown mode '%s' in suite '%s' at %s\n",
 						palette.Crit("%s", mode_cfg["type"]),
@@ -445,6 +474,10 @@ func (yacht *Yacht) Run() int {
 }
 
 func OpenLog(dir string) {
+	if err := os.MkdirAll(dir, 0750); err != nil {
+		fmt.Printf("Failed to create vardir %s", palette.Path(dir))
+		os.Exit(1)
+	}
 	var name = path.Join(dir, "yacht.log")
 	logFile, err := os.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
 	if err != nil {

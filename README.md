@@ -32,8 +32,11 @@ will print output as the testing progresses.
 What this program does
 ----------------------
 
-On start, it looks for test suites and test files, locates a Scylla binary,
-installs it in the test directory, and runs tests against it.
+On start, it tries to find a configuration file in the current, parent, and
+finally home directory. The configuration file is used to provide a path
+to Scylla binary and tests. Then it looks for test suites and test files,
+locates a Scylla binary, installs an instance or instances in the test
+directory, and runs tests against it.
 The CQL queries are executed against 'yacht' keyspace, which is created
 and destroyed automatically.
 It can also be used to connect to an existing Scylla instance and run tests

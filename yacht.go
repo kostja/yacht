@@ -134,9 +134,17 @@ func (env *Env) configure() {
 			env_cfg.ConfigFileUsed(), err)
 		os.Exit(1)
 	}
+	// Resolve the paths in the configuration file relative to where the
+	// configuration file is found, not where the yacht binary is run from.
+	if env_cfg.ConfigFileUsed() != "" {
+		configPath := filepath.Dir(env_cfg.ConfigFileUsed())
+		os.Chdir(configPath)
+	}
 	env.builddir, _ = filepath.Abs(configuration.Scylla.Builddir)
 	env.srcdir, _ = filepath.Abs(configuration.Scylla.Srcdir)
 	env.vardir, _ = filepath.Abs(configuration.Vardir)
+	// Restore the original current working directory, if it was changed
+	os.Chdir(cwd)
 	env.uri = configuration.Scylla.Uri
 	var check_dir = func(name string, value string) {
 		var msg string = "Incorrect configuration setting for %s: %v\n"

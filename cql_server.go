@@ -18,10 +18,16 @@ import (
 	"github.com/google/uuid"
 )
 
+const CREATE_KEYSPACE_TEMPLATE = `CREATE KEYSPACE IF NOT EXISTS yacht
+WITH REPLICATION = { 'class': '%s', 'replication_factor' : %d }
+AND DURABLE_WRITES=true`
+
 // A pre-installed CQL server to which we connect via a URI
 type CQLServerURI struct {
-	uri     string
-	cluster *gocql.ClusterConfig
+	uri                 string
+	replicationFactor   int
+	replicationStrategy string
+	cluster             *gocql.ClusterConfig
 }
 
 func (server *CQLServerURI) ModeName() string {
@@ -38,6 +44,13 @@ func (a *CQLServerURI_artefact) Remove() {
 }
 
 func (server *CQLServerURI) Start(lane *Lane) error {
+
+	if server.replicationFactor == 0 {
+		server.replicationFactor = 1
+	}
+	if server.replicationStrategy == "" {
+		server.replicationStrategy = "SimpleStrategy"
+	}
 	server.cluster = gocql.NewCluster(server.uri)
 	server.cluster.Timeout, _ = time.ParseDuration("30s")
 	// Create an administrative session to prepare
@@ -50,8 +63,9 @@ func (server *CQLServerURI) Start(lane *Lane) error {
 	// Cleanup before running the suit
 	artefact.Remove()
 	// Create a keyspace for testing
-	err = session.Query(`CREATE KEYSPACE IF NOT EXISTS yacht WITH REPLICATION =
-{ 'class': 'SimpleStrategy', 'replication_factor' : 1 } AND DURABLE_WRITES=true`).Exec()
+	var create_keyspace = fmt.Sprintf(CREATE_KEYSPACE_TEMPLATE,
+		server.replicationStrategy, server.replicationFactor)
+	err = session.Query(create_keyspace).Exec()
 	if err != nil {
 		return merry.Wrap(err)
 	}
@@ -65,7 +79,6 @@ func (server *CQLServerURI) Connect() (Connection, error) {
 	if err != nil {
 		return nil, merry.Prepend(err, "when connecting to '"+server.uri+"'")
 	}
-	//	session.SetConsistency(gocql.Any)
 	return &CQLConnection{session: session}, nil
 }
 
@@ -336,6 +349,8 @@ func (cluster *CQLCluster) Start(lane *Lane) error {
 		server.cfg.ClusterName = cluster.clusterName
 		server.cfg.URI = seeds[i]
 		server.cfg.Seed = seedsStr
+		server.CQLServerURI.replicationFactor = len(cluster.servers)
+		server.CQLServerURI.replicationStrategy = "NetworkTopologyStrategy"
 		// We need gossip for clustered start
 		server.cfg.SkipWaitForGossipToSettle = 5
 

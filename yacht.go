@@ -91,6 +91,7 @@ func (env *Env) configure() {
 	env_cfg := viper.New()
 	env_cfg.SetConfigName(".yacht") // name of config file (without extension)
 	env_cfg.AddConfigPath(".")
+	env_cfg.AddConfigPath("..")
 	env_cfg.AddConfigPath("$HOME/")
 
 	// Helper structures to match the nested json/yaml of the configuration

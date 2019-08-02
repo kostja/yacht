@@ -9,16 +9,16 @@ To build:
 
 To use:
 
-Create a directory with a CQL file. The file must end with .test.cql. 
+Create a directory with a CQL file. The file must end with .test.cql.
 This directory is a test suite. Add a suite.yaml configuration file to the
 directory, using [this example](https://github.com/kostja/yacht/blob/master/example.suite.yaml).
 
-Add a configuration file `~/.yacht.yaml`, following [this example](https://github.com/kostja/yacht/blob/master/example.yacht.yaml), 
+Add a configuration file `~/.yacht.yaml`, following [this example](https://github.com/kostja/yacht/blob/master/example.yacht.yaml),
 and point it at your Scylla binary, the directory with the test suite and a
 directory for temporary test artefacts.
 
-Alternatively, use [boilerplate](https://github.com/kostja/yacht/blob/master/boilerplate) 
-directory in this repository, and only modify scylla.builddir in scylla.yaml to 
+Alternatively, use [boilerplate](https://github.com/kostja/yacht/blob/master/boilerplate)
+directory in this repository, and only modify scylla.builddir in scylla.yaml to
 point to a path with Scylla binary.
 
 Run the suite, e.g. with `boilerplate`:
@@ -98,8 +98,14 @@ harness will support multiple lanes, for parallel testing.
 ### Server
 
 A server is the testing subject. It can be a standalone server, created
-outside the harness (`--uri` option) or a temporary instance created by the
-harness automatically.
+outside the harness (`--uri` option) a temporary instance created by the
+harness automatically, or a cluster of 3 Scylla instances. The server
+configuration is set in 'mode' section of the suite configuration file.
+If multiple modes are configured (e.g. 'single' and 'cluster'), then
+the same test is run in all these modes. For single-server mode Yacht
+uses replication factor 1 and Simple replication strategy, for cluster
+set up it uses replication factor 3 and NetworkTopology replicaiton
+strategy. The smp count is always 1 for now and can not be configured.
 
 Patterns
 --------

@@ -1,4 +1,4 @@
 scylla:
-#    builddir: /home/kostja/work/scylla/scylla/build/dev
+    builddir: /home/kostja/work/scylla/scylla/build/dev
     srcdir: .
 vardir: .

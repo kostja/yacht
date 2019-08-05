@@ -7,7 +7,6 @@ import (
 	"os/exec"
 	"path"
 	"regexp"
-	"strings"
 	"sync"
 	"syscall"
 	"text/template"
@@ -308,7 +307,7 @@ func (server *CQLServer) DoStart(lane *Lane) error {
 
 // CQLCluster testing mode
 type CQLCluster struct {
-	servers     [3]*CQLServer
+	servers     [2]*CQLServer
 	builddir    string
 	clusterName string
 }
@@ -327,7 +326,7 @@ func (cluster *CQLCluster) Start(lane *Lane) error {
 		}
 		lane.AddSuiteArtefact(&ReleaseURI_artefact{uri: seeds[i], lane: lane})
 	}
-	var seedsStr = strings.Join(seeds, ", ")
+	var seedsStr = seeds[0]
 
 	var wg sync.WaitGroup
 

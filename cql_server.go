@@ -113,6 +113,7 @@ seed_provider:
           - seeds: {{.Seed}}
 
 skip_wait_for_gossip_to_settle: {{.SkipWaitForGossipToSettle}}
+ring_delay_ms: 3000
 `
 
 type CQLServer struct {
@@ -288,7 +289,7 @@ func FindLogFilePattern(file *os.File, pattern string) bool {
 }
 
 func (server *CQLServer) DoStart(lane *Lane) error {
-	const START_TIMEOUT = 100 * time.Second
+	const START_TIMEOUT = 300 * time.Second
 	lane.AddExitArtefact(&CQLServer_stop_artefact{cmd: server.cmd})
 	if err := server.cmd.Start(); err != nil {
 		return err

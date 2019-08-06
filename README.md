@@ -53,8 +53,9 @@ contains suite description, type and running modes.
 The only supported type is "cql", which means that each .test.cql file in
 the suite is read linewise and sent to a Scylla server. Supported
 running modes are 'single', i.e. run against a single server instance
-which is installed automatically, and 'uri', which uses an existing
-instance.
+which is installed automatically, 'cluster', which creates a cluster of 3 
+instances and a keyspace with replication_factor 3, and 'uri', which uses an 
+existing instance.
 
 ### Test
 

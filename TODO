@@ -9,9 +9,13 @@ done * --uri option: command line and config file
 
 Milestone 2 "Useful to others":
 
+* multiline statements/delimiter
+* test case support within a test file (aka harness commands),
+* output of insert/update statements not just "ok"
+* monitor failed startup 
+
 * --start-and-exit
 * --suite option
-* test case support within a test file (aka harness commands),
 * disable/enable test cases/file in suite.yaml
 * print server log on failure
 * greplog harness command

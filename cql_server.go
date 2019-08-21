@@ -149,7 +149,7 @@ func (server *CQLServer) Start(lane *Lane) error {
 
 	ylog.Printf("Started server %s", server.cfg.URI)
 
-	server.CQLServerURI = CQLServerURI{uri: server.cfg.URI}
+	server.CQLServerURI.uri = server.cfg.URI
 
 	return server.CQLServerURI.Start(lane)
 }
@@ -351,7 +351,6 @@ func (cluster *CQLCluster) Start(lane *Lane) error {
 		server.cfg.URI = seeds[i]
 		server.cfg.Seed = seedsStr
 		server.CQLServerURI.replicationFactor = len(cluster.servers)
-		server.CQLServerURI.replicationStrategy = "NetworkTopologyStrategy"
 		// We need gossip for clustered start
 		server.cfg.SkipWaitForGossipToSettle = 5
 

@@ -84,18 +84,18 @@ func (c *CQLConnection) Execute(cql string) (string, error) {
 	var result CQLResult
 
 	query := c.session.Query(cql)
-	err := query.Exec()
+	iter := query.Iter()
+
+	row, err := iter.RowData()
 
 	if err == nil {
 		result.status = "OK"
 
-		iter := query.Iter()
 		result.warnings = iter.Warnings()
 		for _, column := range iter.Columns() {
 			result.names = append(result.names, column.Name)
 			result.types = append(result.types, column.TypeInfo.Type().String())
 		}
-		row, _ := iter.RowData()
 		for {
 			if !iter.Scan(row.Values...) {
 				break

@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"reflect"
 	"strings"
+	"sort"
 
 	"github.com/ansel1/merry"
 	"github.com/gocql/gocql"
@@ -79,6 +80,37 @@ func (result *CQLResult) String() string {
 	return string(buf.Bytes())
 }
 
+// Go maps are unordered.
+// Pretty print them in string sorted order of key
+func prettyPrint(iface interface{}) string {
+
+	v := reflect.Indirect(reflect.ValueOf(iface))
+	// Todo: unwrap other composite types such as slices, structs and arrays
+	if v.Type().Kind() != reflect.Map {
+		return fmt.Sprint(v.Interface())
+	}
+
+	var keys = v.MapKeys()
+	var strkeys = make([]string, len(keys))
+	var strmap = make(map[string]string)
+
+	for i, key := range keys {
+		strkeys[i] = prettyPrint(key)
+		strmap[strkeys[i]] = prettyPrint(v.MapIndex(key))
+	}
+	sort.Strings(strkeys)
+	buf := new(bytes.Buffer)
+	fmt.Fprintf(buf, "map[")
+	for i, key := range strkeys {
+		fmt.Fprintf(buf, "%s:%s", key, strmap[key])
+		if i + 1 < len(strkeys)  {
+			fmt.Fprintf(buf, " ")
+		}
+	}
+	fmt.Fprintf(buf, "]")
+	return string(buf.Bytes())
+}
+
 func (c *CQLConnection) Execute(cql string) (string, error) {
 
 	var result CQLResult
@@ -102,7 +134,7 @@ func (c *CQLConnection) Execute(cql string) (string, error) {
 			}
 			strrow := make([]string, len(row.Values))
 			for i, v := range row.Values {
-				strrow[i] = fmt.Sprint(reflect.Indirect(reflect.ValueOf(v)))
+					strrow[i] = prettyPrint(v)
 			}
 			result.rows = append(result.rows, strrow)
 		}

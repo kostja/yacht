@@ -2,7 +2,7 @@ package main
 
 import (
 	"fmt"
-
+	"io"
 	"bytes"
 	"reflect"
 	"strings"
@@ -145,6 +145,10 @@ func (c *CQLConnection) Execute(cql string) (string, error) {
 			result.code = CassandraErrorMap[e.Code()]
 			result.message = fmt.Sprintf("%.80s", strings.Split(e.Message(), "\n")[0])
 		default:
+			if err == io.EOF {
+				return "", merry.New("Got EOF from server: check out vardir, it has most probably crashed.")
+			}
+			ylog.Printf("got gocql error of type %v, %+v", e, err)
 			// Transport error or internal driver error, propagate up
 			return "", merry.Wrap(err)
 		}

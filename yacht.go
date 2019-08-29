@@ -449,7 +449,7 @@ func (yacht *Yacht) RunSuites() ([]string, int) {
 				return failed, 1
 			}
 			if suite_rc, err := suite.RunSuite(yacht.env.force, &yacht.lane, server); err != nil {
-				fmt.Printf("%s%v\n", palette.Crit("yacht failure: "), err)
+				fmt.Printf("%s%+v\n", palette.Crit("yacht failure: "), err)
 				return failed, 1
 			} else {
 				rc |= suite_rc

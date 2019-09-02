@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"strings"
 	"sort"
+	"regexp"
 
 	"github.com/ansel1/merry"
 	"github.com/gocql/gocql"
@@ -111,11 +112,16 @@ func prettyPrint(iface interface{}) string {
 	return string(buf.Bytes())
 }
 
+var lwtRE = regexp.MustCompile(`(?i)\sIF\s.*$`)
+
 func (c *CQLConnection) Execute(cql string) (string, error) {
 
 	var result CQLResult
 
 	query := c.session.Query(cql)
+	if lwtRE.MatchString(cql) {
+		query.NoSkipMetadata()
+	}
 	iter := query.Iter()
 
 	row, err := iter.RowData()

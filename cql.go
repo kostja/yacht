@@ -153,6 +153,7 @@ func (test *CQLTestFile) RunTest(force bool, c Connection, lane *Lane) (string, 
 		} else {
 			// @todo: access denied, lost connection
 			// should not trigger test failure with 'force'
+			output.Flush()
 			return "", merry.Wrap(err)
 		}
 	}

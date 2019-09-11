@@ -163,7 +163,7 @@ func (test *CQLTestFile) RunTest(force bool, c Connection, lane *Lane) (string, 
 					break
 				}
 			}
-			line = strings.Join(multiline_statement, "")
+			line = strings.Join(multiline_statement, "\n")
 		}
 		if response, err := c.Execute(line); err == nil {
 			fmt.Fprint(output, response)

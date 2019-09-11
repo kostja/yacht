@@ -68,6 +68,8 @@ type Env struct {
 	// patterns are provided, every test name is matched against every
 	// pattern, so if the same test file matches two patterns it is run twice.
 	patterns []string
+	// Run only tests in the specified mode
+	mode string
 	// Where to look for test suites
 	srcdir string
 	// A temporary directory where to run the tests;
@@ -174,6 +176,9 @@ func (env *Env) Usage() {
 Default: false`)
 	pflag.StringVar(&env.uri, "uri", env.uri,
 		"Server URI to connect to in URI mode")
+	pflag.StringVar(&env.mode, "mode", "",
+		`Only run tests in the specified mode.
+Default: use modes from the suite config.`)
 	pflag.Usage = func() {
 		fmt.Println("yacht - a Yet Another Scylla Harness for Testing")
 		fmt.Printf("\nUsage: %v [--force] [pattern [...]]\n", os.Args[0])
@@ -405,6 +410,10 @@ func (yacht *Yacht) findSuites() {
 				cfg.Mode = append(cfg.Mode, map[string]string{"type": "uri"})
 			}
 			for _, mode_cfg := range cfg.Mode {
+				if len(yacht.env.mode) > 0 &&
+					strings.EqualFold(mode_cfg["type"], yacht.env.mode) == false {
+					continue
+				}
 				var server Server
 				if strings.EqualFold(mode_cfg["type"], "uri") == true {
 					server = &CQLServerURI{uri: yacht.env.uri}

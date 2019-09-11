@@ -108,6 +108,7 @@ type CQLTestFile struct {
 
 // matches comments and whitespace
 var commentRE = regexp.MustCompile(`^\s*((--|\/\/).*)?$`)
+var delimiterRE = regexp.MustCompile(`;[[:space:]]*$`)
 var testCQLRE = regexp.MustCompile(`test\.cql$`)
 var resultRE = regexp.MustCompile(`result$`)
 
@@ -147,6 +148,22 @@ func (test *CQLTestFile) RunTest(force bool, c Connection, lane *Lane) (string, 
 		fmt.Fprintln(output, line)
 		if commentRE.MatchString(line) {
 			continue
+		}
+		// Complete multiline statements, skipping comments
+		if delimiterRE.MatchString(line) == false {
+			multiline_statement := []string{line}
+			for input.Scan() {
+				line := input.Text()
+				fmt.Fprintln(output, line)
+				if commentRE.MatchString(line) {
+					continue
+				}
+				multiline_statement = append(multiline_statement, line)
+				if delimiterRE.MatchString(line) {
+					break
+				}
+			}
+			line = strings.Join(multiline_statement, "")
 		}
 		if response, err := c.Execute(line); err == nil {
 			fmt.Fprint(output, response)

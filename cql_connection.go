@@ -112,7 +112,7 @@ func prettyPrint(iface interface{}) string {
 	return string(buf.Bytes())
 }
 
-var lwtRE = regexp.MustCompile(`(?i)\sIF\s.*$`)
+var lwtRE = regexp.MustCompile(`(?i)\sIF\s.*`)
 
 func (c *CQLConnection) Execute(cql string) (string, error) {
 

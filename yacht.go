@@ -59,6 +59,19 @@ type Server interface {
 	ModeName() string
 }
 
+type StartAndExit struct {
+	Server
+}
+
+func (server *StartAndExit) Start(lane *Lane) error {
+	if err := server.Server.Start(lane); err != nil {
+		return err
+	}
+	fmt.Println("Successfully started, exiting...")
+	os.Exit(0)
+	return nil
+}
+
 // Yacht running environment.
 type Env struct {
 	// Continue running tests even if a single test fails
@@ -80,7 +93,8 @@ type Env struct {
 	builddir string
 	// --uri option, if provided, or uri: in the configuration file,
 	// or "127.0.0.1"
-	uri string
+	uri            string
+	start_and_exit bool
 }
 
 // Look up a configuration file and load it if found
@@ -172,13 +186,20 @@ func (env *Env) Usage() {
 	env.configure()
 
 	pflag.BoolVar(&env.force, "force", false,
-		`Go on with other tests in case of an individual test failure.
-Default: false`)
+		`Go on with other tests in case of an individual
+test failure. Default: false`)
 	pflag.StringVar(&env.uri, "uri", env.uri,
 		"Server URI to connect to in URI mode")
+	pflag.BoolVar(&env.start_and_exit, "start-and-exit", env.start_and_exit,
+		`Configure the cluster according to the first
+matching suite/mode combo and exit. For example:
+./yacht --mode=cluster --start-and-exit.
+Default: false.`)
 	pflag.StringVar(&env.mode, "mode", "",
-		`Only run tests in the specified mode.
-Default: use modes from the suite config.`)
+		`Only run tests in the specified mode. The mode
+must be among the modes in the suite config.
+Supported modes: uri, single, cluser.
+Default: use all modes from the suite config.`)
 	pflag.Usage = func() {
 		fmt.Println("yacht - a Yet Another Scylla Harness for Testing")
 		fmt.Printf("\nUsage: %v [--force] [pattern [...]]\n", os.Args[0])
@@ -427,6 +448,9 @@ func (yacht *Yacht) findSuites() {
 						palette.Crit("%s", suite.name),
 						palette.Path("%s", suite_cfg.ConfigFileUsed()))
 					continue
+				}
+				if yacht.env.start_and_exit == true {
+					server = &StartAndExit{server}
 				}
 				suite.AddMode(server)
 			}

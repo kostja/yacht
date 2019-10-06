@@ -1,13 +1,12 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"io"
-	"bytes"
 	"reflect"
-	"strings"
 	"sort"
-	"regexp"
+	"strings"
 
 	"github.com/ansel1/merry"
 	"github.com/gocql/gocql"
@@ -104,7 +103,7 @@ func prettyPrint(iface interface{}) string {
 	fmt.Fprintf(buf, "map[")
 	for i, key := range strkeys {
 		fmt.Fprintf(buf, "%s:%s", key, strmap[key])
-		if i + 1 < len(strkeys)  {
+		if i+1 < len(strkeys) {
 			fmt.Fprintf(buf, " ")
 		}
 	}
@@ -112,16 +111,11 @@ func prettyPrint(iface interface{}) string {
 	return string(buf.Bytes())
 }
 
-var lwtRE = regexp.MustCompile(`(?i)\sIF\s.*`)
-
 func (c *CQLConnection) Execute(cql string) (string, error) {
 
 	var result CQLResult
 
 	query := c.session.Query(cql)
-	if lwtRE.MatchString(cql) {
-		query.NoSkipMetadata()
-	}
 	iter := query.Iter()
 
 	row, err := iter.RowData()
@@ -140,7 +134,7 @@ func (c *CQLConnection) Execute(cql string) (string, error) {
 			}
 			strrow := make([]string, len(row.Values))
 			for i, v := range row.Values {
-					strrow[i] = prettyPrint(v)
+				strrow[i] = prettyPrint(v)
 			}
 			result.rows = append(result.rows, strrow)
 		}

@@ -249,7 +249,7 @@ func (server *CQLServer) Install(lane *Lane) error {
 	// Do not confuse Scylla binary if we derived this from the parent process
 	os.Unsetenv("SCYLLA_HOME")
 
-	cmd := exec.Command(server.exe, fmt.Sprintf("--smp=%d", server.cfg.SMP))
+	cmd := exec.Command(server.exe, "--experimental=on", fmt.Sprintf("--smp=%d", server.cfg.SMP))
 	cmd.Dir = server.cfg.Dir
 	cmd.Env = append(cmd.Env, fmt.Sprintf("SCYLLA_CONF=%s", server.cfg.Dir))
 	cmd.Stdout = logFile

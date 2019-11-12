@@ -96,6 +96,7 @@ type CQLServerConfig struct {
 var SCYLLA_CONF_TEMPLATE string = `
 cluster_name: {{.ClusterName}}
 developer_mode: true
+experimental: true
 data_file_directories:
     - {{.Dir}}/data
 commitlog_directory: {{.Dir}}/commitlog

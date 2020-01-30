@@ -132,6 +132,7 @@ type CQLServer struct {
 	configFileName string
 	cmd            *exec.Cmd
 	logFile        *os.File
+	posInCluster    int
 }
 
 func (server *CQLServer) ModeName() string {
@@ -256,7 +257,14 @@ func (server *CQLServer) Install(lane *Lane) error {
 	// Do not confuse Scylla binary if we derived this from the parent process
 	os.Unsetenv("SCYLLA_HOME")
 
-	cmd := exec.Command(server.exe, fmt.Sprintf("--smp=%d", server.cfg.SMP), "--memory=8G", "--io-properties-file=/home/kostja/iotune.yaml")
+	cmd := exec.Command(server.exe,
+		fmt.Sprintf("--smp=%d", server.cfg.SMP),
+		"--memory=8G",
+		"--io-properties-file=/home/kostja/iotune.yaml",
+		fmt.Sprintf("--cpuset=%d-%d",
+			server.posInCluster * server.cfg.SMP + 1,
+			(server.posInCluster+1) * server.cfg.SMP),
+		)
 	cmd.Dir = server.cfg.Dir
 	cmd.Env = append(cmd.Env, fmt.Sprintf("SCYLLA_CONF=%s", server.cfg.Dir))
 	cmd.Stdout = logFile
@@ -358,6 +366,7 @@ func (cluster *CQLCluster) Start(lane *Lane) error {
 		server.cfg.URI = seeds[i]
 		server.cfg.Seed = seedsStr
 		server.CQLServerURI.replicationFactor = len(cluster.servers)
+		server.posInCluster = i
 		// We need gossip for clustered start
 		server.cfg.SkipWaitForGossipToSettle = 5
 

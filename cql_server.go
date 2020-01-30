@@ -95,7 +95,7 @@ type CQLServerConfig struct {
 
 var SCYLLA_CONF_TEMPLATE string = `
 cluster_name: {{.ClusterName}}
-developer_mode: true
+#developer_mode: true
 experimental: true
 data_file_directories:
     - {{.Dir}}/data
@@ -107,6 +107,12 @@ listen_address: {{.URI}}
 rpc_address: {{.URI}}
 api_address: {{.URI}}
 prometheus_address: {{.URI}}
+
+commitlog_segment_size_in_mb: 1
+
+read_request_timeout_in_ms: 10000
+write_request_timeout_in_ms: 10000
+cas_contention_timeout_in_ms: 10000
 
 seed_provider:
     - class_name: org.apache.cassandra.locator.SimpleSeedProvider
@@ -250,7 +256,7 @@ func (server *CQLServer) Install(lane *Lane) error {
 	// Do not confuse Scylla binary if we derived this from the parent process
 	os.Unsetenv("SCYLLA_HOME")
 
-	cmd := exec.Command(server.exe, fmt.Sprintf("--smp=%d", server.cfg.SMP))
+	cmd := exec.Command(server.exe, fmt.Sprintf("--smp=%d", server.cfg.SMP), "--memory=8G", "--io-properties-file=/home/kostja/iotune.yaml")
 	cmd.Dir = server.cfg.Dir
 	cmd.Env = append(cmd.Env, fmt.Sprintf("SCYLLA_CONF=%s", server.cfg.Dir))
 	cmd.Stdout = logFile

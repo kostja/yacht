@@ -108,7 +108,7 @@ rpc_address: {{.URI}}
 api_address: {{.URI}}
 prometheus_address: {{.URI}}
 
-commitlog_segment_size_in_mb: 1
+#commitlog_segment_size_in_mb: 1
 
 read_request_timeout_in_ms: 10000
 write_request_timeout_in_ms: 10000
@@ -267,6 +267,10 @@ func (server *CQLServer) Install(lane *Lane) error {
 		)
 	cmd.Dir = server.cfg.Dir
 	cmd.Env = append(cmd.Env, fmt.Sprintf("SCYLLA_CONF=%s", server.cfg.Dir))
+	// Enable profiler options
+	cmd.Env = append(cmd.Env, fmt.Sprintf("CPUPROFILE=/tmp/scylla-%d.prof", server.posInCluster))
+	cmd.Env = append(cmd.Env, "CPUPROFILESIGNAL=12")
+	// End enable profiler options
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
 

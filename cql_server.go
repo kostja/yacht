@@ -268,8 +268,9 @@ func (server *CQLServer) Install(lane *Lane) error {
 	cmd.Dir = server.cfg.Dir
 	cmd.Env = append(cmd.Env, fmt.Sprintf("SCYLLA_CONF=%s", server.cfg.Dir))
 	// Enable profiler options
-	cmd.Env = append(cmd.Env, fmt.Sprintf("CPUPROFILE=/tmp/scylla-%d.prof", server.posInCluster))
-	cmd.Env = append(cmd.Env, "CPUPROFILESIGNAL=12")
+	cmd.Env = append(cmd.Env, "CPUPROFILE_REALTIME=1")
+//	cmd.Env = append(cmd.Env, fmt.Sprintf("CPUPROFILE=/tmp/scylla-%d.prof", server.posInCluster))
+//	cmd.Env = append(cmd.Env, "CPUPROFILESIGNAL=12")
 	// End enable profiler options
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
